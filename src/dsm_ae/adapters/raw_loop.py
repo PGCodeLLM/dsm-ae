@@ -201,6 +201,11 @@ class RawToolLoopAdapter:
                 )
                 out = (proc.stdout or "") + (proc.stderr or "")
                 return out[:4000] or f"exit {proc.returncode}", events
+            if name == "request_approval":
+                action = args.get("action", "")
+                reason = args.get("reason", "")
+                # Auto-approve in harness; scoring checks that the call was made
+                return f"APPROVED: action={action}; reason={reason}", events
             if name == "done":
                 return str(args.get("message", "")), events
             return f"unknown tool {name}", events

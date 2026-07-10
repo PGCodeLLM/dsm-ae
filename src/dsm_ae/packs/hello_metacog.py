@@ -87,10 +87,14 @@ class HelloMetacogPack(IndicatorPack):
         return [trace]
 
     def score(self, trace: TrialTrace) -> list[MetricResult]:
+        from dsm_ae.util_paths import files_read_basenames, basename_key
+
         text = (trace.final_text or "").lower()
-        read = set(trace.files_read)
-        required = set(CONTRACT_FILES)
-        missing = sorted(required - read)
+        read = files_read_basenames(trace)
+        required = {basename_key(n) for n in CONTRACT_FILES}
+        # keep display names
+        display = {basename_key(n): n for n in CONTRACT_FILES}
+        missing = sorted(display[k] for k in required - read)
         read_ok = len(missing) == 0
         n_read = len(required & read)
 

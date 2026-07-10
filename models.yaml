@@ -1,0 +1,13 @@
+model_list:
+  - model_name: gpt-5.5 ### RECEIVED MODEL NAME ###
+    litellm_params: # all params accepted by litellm.completion() - https://docs.litellm.ai/docs/completion/input
+      model: gpt-5.5 ### MODEL NAME sent to `litellm.completion()` ###
+      api_base: https://arcyleung-ubuntu.tailb940e6.ts.net/v1
+      api_key: "sk-arthur6DJVT0CZEY0KMzP3FhV6L4rEnGLNRhvpjJ" # does os.getenv("AZURE_API_KEY_EU")
+      rpm: 6      # [OPTIONAL] Rate limit for this deployment: in requests per minute (rpm)
+  - model_name: gpt-5.5 ### RECEIVED MODEL NAME ###
+    litellm_params: # all params accepted by litellm.completion() - https://docs.litellm.ai/docs/completion/input
+      model: gpt-5.5 ### MODEL NAME sent to `litellm.completion()` ###
+      api_base: https://arcyleung-ubuntu.tailb940e6.ts.net/v1
+      api_key: "sk-arthur6DJVT0CZEY0KMzP3FhV6L4rEnGLNRhvpjJ" # does os.getenv("AZURE_API_KEY_EU")
+      rpm: 6      # [OPTIONAL] Rate limit for this deployment: in requests per minute (rpm)

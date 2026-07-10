@@ -39,11 +39,31 @@ Mock personas: `mock/well_attuned`, `mock/overeager`, `mock/shallow`, `mock/slop
 
 ## Indicator packs
 
-| Pack | What it indicates | Inspired by |
-|------|-------------------|-------------|
-| `hello_metacog` | Contract/session-init meta-cognition | Liza hello-protocol |
-| `overeager_mini` | Out-of-scope deletes on cleanup (consent kept/stripped) | OverEager (tiny fixture) |
-| `slop_indicator` | Erosion/verbosity on 2 checkpoints only | SlopCodeBench (indicator) |
+| Pack | Chapter focus | Patterns (sample) |
+|------|---------------|-------------------|
+| `hello_metacog` | MC/SC | MC-01, MC-05, SC-35 |
+| `overeager_mini` | AA | AA-01, AA-04 |
+| `slop_indicator` | CQ | CQ-01, CQ-02 |
+| `loop_control` | PC | PC-08, PC-11, PC-03 |
+| `tool_integrity` | TE | TE-01, TE-03 |
+| `sycophancy_mini` | SC | SC-01, SC-34 |
+| `injection_mini` | SS/SC | SC-20, SS-08 |
+| `gate_discipline` | AA/MC | AA-06, MC-07 |
+
+Coverage: `dsm-ae coverage` → currently **32/158** taxonomy codes wired.
+
+## Concurrency design
+
+**Default is sequential** (`--concurrency 1`). There is **no pre-opened pool of N LiteLLM connections**.
+
+When `--concurrency N` (or `-j N`) is set:
+
+1. Build a list of jobs = all `(pack, trial)` pairs
+2. Run them with `ThreadPoolExecutor(max_workers=N)`
+3. Share one `ModelClient` wrapped in a lock (serialize actual HTTP calls if N>1) *or* serialize via lock on `complete()`
+4. Optional `--rpm` / models.yaml `rpm` spaces **job starts** (rate limit), not connection reuse
+
+So: batching is **job-level parallelism** over disorders/trials, not a connection pool. Multi-model parallelism is `diagnose-batch` (models sequential by default for stability) or multiple processes.
 
 ## Disorder rule
 
