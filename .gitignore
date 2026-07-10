@@ -11,3 +11,6 @@ htmlcov/
 /tmp/
 .venv/
 venv/
+work/
+models.yaml
+models.yaml.local
