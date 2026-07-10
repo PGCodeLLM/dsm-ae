@@ -20,6 +20,21 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+try:
+    from dsm_ae.metric_citations import (
+        citations_for_metric,
+        format_cite_keys,
+        references_used,
+    )
+except ImportError:  # script run without package path
+    import sys
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+    from dsm_ae.metric_citations import (
+        citations_for_metric,
+        format_cite_keys,
+        references_used,
+    )
+
 
 def discover_jsons(paths: list[Path]) -> list[Path]:
     found: list[Path] = []
@@ -183,9 +198,26 @@ def build_html(
             f"<tr><th class='row'>{html.escape(pack)}</th>{''.join(cells)}</tr>"
         )
 
-    # gates matrix
+    # gates matrix (with survey citation footnotes on metric names)
     gate_rows = []
+    cited_ref_ids: set[int] = set()
     for metric in metrics:
+        cite_ids = citations_for_metric(metric)
+        cited_ref_ids.update(cite_ids)
+        if cite_ids:
+            cite_html = " ".join(
+                f'<a class="cite" href="#ref-{i}">[{i}]</a>' for i in sorted(set(cite_ids))
+            )
+            # compact form [1,3] with multi-links still individual anchors
+            keys = format_cite_keys(cite_ids)
+            cite_html = (
+                '<sup class="cites">['
+                + ",".join(f'<a class="cite" href="#ref-{i}">{i}</a>' for i in sorted(set(cite_ids)))
+                + "]</sup>"
+            )
+            metric_label = f"<code>{html.escape(metric)}</code> {cite_html}"
+        else:
+            metric_label = f"<code>{html.escape(metric)}</code>"
         cells = []
         for m in models:
             text, cls = fmt_gate_cell(by_model[m]["gates"].get(metric))
@@ -195,8 +227,21 @@ def build_html(
                 title_attr = f" title=\"{html.escape(str(g['explanation'])[:400])}\""
             cells.append(f"<td class='{cls}'{title_attr}>{html.escape(text)}</td>")
         gate_rows.append(
-            f"<tr><th class='row'><code>{html.escape(metric)}</code></th>{''.join(cells)}</tr>"
+            f"<tr><th class='row'>{metric_label}</th>{''.join(cells)}</tr>"
         )
+
+    # references section (only those cited by metrics present in this report)
+    refs_map = references_used(metrics)
+    ref_items = []
+    for num, meta in refs_map.items():
+        url = meta.get("url") or ""
+        text = meta.get("text") or meta.get("short") or str(num)
+        if url:
+            body = f'<a href="{html.escape(url)}" target="_blank" rel="noopener">{html.escape(text)}</a>'
+        else:
+            body = html.escape(text)
+        ref_items.append(f'<li id="ref-{num}"><span class="refnum">[{num}]</span> {body}</li>')
+    refs_html = "\n".join(ref_items) if ref_items else "<li>No survey citations mapped for these metrics.</li>"
 
     # findings matrix
     finding_rows = []
@@ -302,6 +347,16 @@ def build_html(
   td {{ color: #fff; font-variant-numeric: tabular-nums; }}
   code {{ font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 0.84em; }}
   footer {{ margin-top: 28px; color: var(--muted); font-size: 0.82rem; }}
+  sup.cites {{ font-weight: 500; margin-left: 4px; white-space: nowrap; }}
+  a.cite {{ color: #8ec7ff; text-decoration: none; }}
+  a.cite:hover {{ text-decoration: underline; }}
+  .refs .reflist {{ margin: 0; padding-left: 0; list-style: none; }}
+  .refs .reflist li {{
+    margin: 0 0 10px; padding: 8px 10px; border-bottom: 1px solid var(--border);
+    color: var(--text); font-size: 0.9rem;
+  }}
+  .refs .refnum {{ color: #8ec7ff; font-weight: 650; margin-right: 6px; }}
+  .refs .reflist li:target {{ background: #243247; border-radius: 6px; }}
 </style>
 </head>
 <body>
@@ -353,7 +408,15 @@ def build_html(
     </table>
   </div>
 
-  <h2>Sources</h2>
+  <h2>References</h2>
+  <p>Survey sources motivating each outcome-gate metric (from DSM-AE literature survey / <code>sources/bibliography.md</code>). Click citation links in the metric column to jump here.</p>
+  <div class="panel refs">
+    <ol class="reflist">
+      {refs_html}
+    </ol>
+  </div>
+
+  <h2>Sources (run artifacts)</h2>
   <ul>
     {''.join(source_blocks)}
   </ul>
