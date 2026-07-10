@@ -178,5 +178,28 @@ def diagnose_batch_cmd(
         _print_report(report, out_dir / f"{safe}.md", out_dir / f"{safe}.json")
 
 
+
+@app.command("html-report")
+def html_report_cmd(
+    input_dir: Path = typer.Option(Path("reports"), "--input", "-i", help="Dir of diagnosis JSON"),
+    out: Path = typer.Option(Path("reports/dsm-ae-matrix.html"), "--out", "-o"),
+    include_mock: bool = typer.Option(False, "--include-mock"),
+    title: str = typer.Option("DSM-AE Multi-Model Report", "--title"),
+) -> None:
+    """Build HTML comparison matrix from diagnosis JSON files (NOT RUN for missing)."""
+    import runpy
+    import sys
+    script = Path.cwd() / "scripts" / "json_to_html_report.py"
+    if not script.exists():
+        script = Path(__file__).resolve().parents[2] / "scripts" / "json_to_html_report.py"
+    # Import as module for reliability under editable installs
+    sys.path.insert(0, str(script.parent))
+    from json_to_html_report import main as html_main  # type: ignore
+    args = [str(input_dir), "-o", str(out), "--title", title]
+    if include_mock:
+        args.append("--include-mock")
+    raise SystemExit(html_main(args))
+
+
 if __name__ == "__main__":
     app()
