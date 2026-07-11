@@ -7,6 +7,7 @@ before requests hit this app, so routes live at ``/``. Use ``public_base``
 
 from __future__ import annotations
 
+import json
 import os
 import threading
 from contextlib import asynccontextmanager
@@ -15,12 +16,13 @@ from pathlib import Path
 from typing import Any, AsyncIterator, Optional
 
 from fastapi import Depends, FastAPI, Form, Header, HTTPException, Query, Request
+from fastapi.openapi.docs import get_swagger_ui_html
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from dsm_ae.packs.registry import list_packs
-from dsm_ae.queue.models import EvalJob, JobStatus
+from dsm_ae.queue.models import EvalJob
 from dsm_ae.queue.store import JobStore
 from dsm_ae.queue.worker import default_worker_id, run_loop
 
@@ -113,7 +115,8 @@ def create_app(
     app = FastAPI(
         title="DSM-AE Eval Queue",
         version="0.1.0",
-        docs_url="/docs",
+        # Custom /docs below so openapi_url includes public_base (funnel-safe).
+        docs_url=None,
         redoc_url=None,
         lifespan=lifespan,
     )
@@ -124,10 +127,31 @@ def create_app(
     app.state.token = resolved_token
     app.state.worker_thread = None
 
+    # Optional dual-access: accept /dsm-ae/... when the prefix was NOT already
+    # stripped (e.g. local curl http://127.0.0.1:8765/dsm-ae/api/jobs).
+    # Do not rewrite root_path on every request — that breaks StaticFiles.
+    if base:
+
+        @app.middleware("http")
+        async def _strip_public_base(request: Request, call_next):  # type: ignore[no-untyped-def]
+            path = request.scope.get("path", "") or ""
+            if path == base or path.startswith(base + "/"):
+                request.scope["path"] = path[len(base) :] or "/"
+            return await call_next(request)
+
     def href(path: str) -> str:
         if not path.startswith("/"):
             path = "/" + path
         return f"{base}{path}" if base else path
+
+    @app.get("/docs", include_in_schema=False)
+    def swagger_ui() -> HTMLResponse:
+        # Browser must fetch openapi under the funnel prefix; the app itself still
+        # serves the schema at /openapi.json (proxy strips public_base).
+        return get_swagger_ui_html(
+            openapi_url=href("/openapi.json"),
+            title=f"{app.title} - Swagger UI",
+        )
 
     def require_token(
         request: Request,
@@ -296,59 +320,22 @@ def _resolve(store: JobStore, job_id: str) -> EvalJob | None:
     return None
 
 
-def _status_badge(status: str) -> str:
-    colors = {
-        "queued": "#0288d1",
-        "running": "#f9a825",
-        "succeeded": "#2e7d32",
-        "failed": "#c62828",
-        "cancelled": "#757575",
-    }
-    c = colors.get(status, "#333")
-    return (
-        f'<span style="background:{c};color:#fff;padding:1px 6px;'
-        f'border-radius:3px;font-size:12px">{status}</span>'
-    )
-
-
 def _page(store: JobStore, href, auth_required: bool, title: str) -> str:
-    jobs = store.list_jobs(limit=100)
     packs = list_packs()
-    rows = []
-    for j in jobs:
-        packs_s = ",".join(j.packs) if j.packs else "—"
-        err = (j.error or "")[:120]
-        if j.error and len(j.error) > 120:
-            err += "…"
-        actions = []
-        if j.status == JobStatus.QUEUED:
-            actions.append(f'<form method="post" action="{href("/api/jobs/" + j.id + "/cancel")}" style="display:inline" onsubmit="return apiPost(event)">'
-                           f'<button type="submit">cancel</button></form>')
-        if j.status in (JobStatus.FAILED, JobStatus.CANCELLED):
-            actions.append(f'<form method="post" action="{href("/api/jobs/" + j.id + "/retry")}" style="display:inline" onsubmit="return apiPost(event)">'
-                           f'<button type="submit">retry</button></form>')
-        rows.append(
-            "<tr>"
-            f"<td><code title=\"{j.id}\">{j.id[:8]}</code></td>"
-            f"<td>{_status_badge(j.status.value)}</td>"
-            f"<td><code>{_esc(j.model)}</code></td>"
-            f"<td>{j.k}</td>"
-            f"<td style=\"max-width:180px;overflow:hidden;text-overflow:ellipsis\">{_esc(packs_s)}</td>"
-            f"<td>{_esc(j.label or '')}</td>"
-            f"<td style=\"font-size:11px\">{_esc(j.created_at)}</td>"
-            f"<td style=\"font-size:11px;color:#a00\">{_esc(err)}</td>"
-            f"<td>{' '.join(actions)}</td>"
-            "</tr>"
-        )
-    table_body = "\n".join(rows) if rows else (
-        '<tr><td colspan="9" style="color:#666">No jobs yet — enqueue below.</td></tr>'
-    )
     pack_opts = "\n".join(f'<option value="{_esc(p)}">{_esc(p)}</option>' for p in packs)
     token_row = ""
     if auth_required:
         token_row = """
-        <label>Token <input type="password" name="token" id="token" placeholder="queue token" autocomplete="off"/></label>
+        <label>Token
+          <input type="password" name="token" id="token" placeholder="queue token"
+                 autocomplete="off" data-persist="token"/>
+        </label>
         """
+    # Derive configured base from href helper (e.g. "/dsm-ae"); JS re-detects live.
+    sample = href("/queue")
+    configured_base = ""
+    if sample.startswith("/") and sample.endswith("/queue"):
+        configured_base = sample[: -len("/queue")]
     return f"""<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -372,27 +359,40 @@ def _page(store: JobStore, href, auth_required: bool, title: str) -> str:
   form.enqueue input[type=password], form.enqueue select {{
     width: min(420px, 100%); padding: 4px 6px; margin-top: 2px;
   }}
-  form.enqueue button, td button {{
+  form.enqueue button, button.action {{
     background: #1565c0; color: #fff; border: 0; border-radius: 4px;
     padding: 6px 12px; cursor: pointer; font-size: 13px;
   }}
-  td button {{ background: #555; padding: 2px 8px; font-size: 12px; }}
+  button.action {{ background: #555; padding: 2px 8px; font-size: 12px; }}
+  button.action:disabled {{ opacity: 0.5; cursor: not-allowed; }}
   code {{ font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; }}
   .hint {{ color: #666; font-size: 12px; }}
+  .hint .ok {{ color: #2e7d32; }}
+  .hint .err {{ color: #c62828; }}
+  .status {{ color: #fff; padding: 1px 6px; border-radius: 3px; font-size: 12px; }}
+  .st-queued {{ background: #0288d1; }}
+  .st-running {{ background: #f9a825; color: #111; }}
+  .st-succeeded {{ background: #2e7d32; }}
+  .st-failed {{ background: #c62828; }}
+  .st-cancelled {{ background: #757575; }}
+  #flash {{ margin: 0 0 10px; font-size: 13px; min-height: 1.2em; }}
+  #flash.ok {{ color: #2e7d32; }}
+  #flash.err {{ color: #c62828; }}
 </style>
 </head>
-<body>
+<body data-configured-base="{_esc(configured_base)}">
   <h1>DSM-AE evaluation queue</h1>
   <p class="meta">Enqueue models for diagnosis · credentials stay in models.yaml · jobs never store API keys</p>
   <nav>
-    <a href="{href("/")}">Queue</a>
-    <a href="{href("/matrix")}">Comparison matrix</a>
-    <a href="{href("/reports/")}">Reports</a>
-    <a href="{href("/docs")}">API docs</a>
+    <a href="{href("/")}" data-nav="/">Queue</a>
+    <a href="{href("/matrix")}" data-nav="/matrix" target="_blank" rel="noopener">Comparison matrix</a>
+    <a href="{href("/reports/")}" data-nav="/reports/" target="_blank" rel="noopener">Reports</a>
+    <a href="{href("/docs")}" data-nav="/docs" target="_blank" rel="noopener">API docs</a>
   </nav>
+  <div id="flash" role="status" aria-live="polite"></div>
 
   <div class="panel">
-    <h2>Jobs</h2>
+    <h2>Jobs <span id="jobs-updated" class="hint"></span></h2>
     <table>
       <thead>
         <tr>
@@ -400,62 +400,266 @@ def _page(store: JobStore, href, auth_required: bool, title: str) -> str:
           <th>Label</th><th>Created</th><th>Error</th><th></th>
         </tr>
       </thead>
-      <tbody>
-        {table_body}
+      <tbody id="jobs-body">
+        <tr><td colspan="9" style="color:#666">Loading…</td></tr>
       </tbody>
     </table>
-    <p class="hint">Auto-refresh every 5s. Cancel only works for queued; retry for failed/cancelled.</p>
+    <p class="hint">Jobs table refreshes every 5s without reloading the page (form fields stay intact). Cancel: queued only; retry: failed/cancelled.</p>
   </div>
 
   <div class="panel">
     <h2>Enqueue</h2>
-    <form class="enqueue" method="post" action="{href("/queue")}">
+    <form class="enqueue" id="enqueue-form" method="post" action="{href("/queue")}">
       {token_row}
       <label>Model id
-        <input type="text" name="model" required placeholder="mock/well_attuned or gpt-5.6-terra"
-               autocomplete="off"/>
+        <input type="text" name="model" id="f-model" required
+               placeholder="mock/well_attuned or gpt-5.6-terra"
+               autocomplete="off" data-persist="model"/>
       </label>
       <label>Packs (comma-separated; leave empty for all / default)
-        <input type="text" name="packs" list="packlist" placeholder="hello_metacog,overeager_mini"/>
+        <input type="text" name="packs" id="f-packs" list="packlist"
+               placeholder="hello_metacog,overeager_mini" data-persist="packs"/>
         <datalist id="packlist">{pack_opts}</datalist>
       </label>
-      <label><input type="checkbox" name="full_suite" value="1"/> Full suite (all registered packs)</label>
+      <label><input type="checkbox" name="full_suite" id="f-full" value="1" data-persist="full_suite"/> Full suite (all registered packs)</label>
       <label>k (bootstrap trials)
-        <input type="number" name="k" value="3" min="1" max="50"/>
+        <input type="number" name="k" id="f-k" value="3" min="1" max="50" data-persist="k"/>
       </label>
       <label>Concurrency (pack×trial)
-        <input type="number" name="concurrency" value="1" min="1" max="32"/>
+        <input type="number" name="concurrency" id="f-concurrency" value="1" min="1" max="32" data-persist="concurrency"/>
       </label>
       <label>Priority
-        <input type="number" name="priority" value="0"/>
+        <input type="number" name="priority" id="f-priority" value="0" data-persist="priority"/>
       </label>
       <label>Label (optional)
-        <input type="text" name="label" placeholder="demo-run"/>
+        <input type="text" name="label" id="f-label" placeholder="demo-run" data-persist="label"/>
       </label>
-      <button type="submit">Enqueue</button>
+      <button type="submit" id="enqueue-btn">Enqueue</button>
     </form>
   </div>
 
 <script>
-async function apiPost(ev) {{
-  ev.preventDefault();
-  const form = ev.target;
-  const headers = {{}};
-  const tok = document.getElementById('token');
-  if (tok && tok.value) {{
-    headers['Authorization'] = 'Bearer ' + tok.value;
-    headers['X-DSM-AE-Token'] = tok.value;
+(function () {{
+  const AUTH_REQUIRED = {json.dumps(auth_required)};
+  const STORAGE_KEY = "dsm-ae-queue-form-v1";
+  const POLL_MS = 5000;
+
+  // Resolve public base so the same server works on :8765 and funnel /dsm-ae.
+  function detectBase() {{
+    const p = location.pathname || "/";
+    if (p === "/dsm-ae" || p.startsWith("/dsm-ae/")) return "/dsm-ae";
+    const configured = (document.body.dataset.configuredBase || "").replace(/\\/$/, "");
+    if (configured && (p === configured || p.startsWith(configured + "/"))) {{
+      return configured;
+    }}
+    // Local root (or any non-prefixed path): never force funnel prefix.
+    return "";
   }}
-  const res = await fetch(form.action, {{ method: 'POST', headers }});
-  if (!res.ok) {{
-    const t = await res.text();
-    alert('Failed: ' + res.status + ' ' + t);
-    return false;
+  const BASE = detectBase();
+  function href(path) {{
+    if (!path.startsWith("/")) path = "/" + path;
+    return BASE + path;
   }}
-  location.reload();
-  return false;
-}}
-setTimeout(() => location.reload(), 5000);
+  const API_JOBS = href("/api/jobs");
+
+  // Wire nav + form action to the live base (avoids hard-coded /dsm-ae on localhost).
+  document.querySelectorAll("a[data-nav]").forEach((a) => {{
+    a.setAttribute("href", href(a.getAttribute("data-nav") || "/"));
+  }});
+  const formEl = document.getElementById("enqueue-form");
+  if (formEl) formEl.setAttribute("action", href("/queue"));
+
+  function flash(msg, ok) {{
+    const el = document.getElementById("flash");
+    el.textContent = msg || "";
+    el.className = msg ? (ok ? "ok" : "err") : "";
+  }}
+
+  function authHeaders() {{
+    const headers = {{}};
+    const tok = document.getElementById("token");
+    if (tok && tok.value) {{
+      headers["Authorization"] = "Bearer " + tok.value;
+      headers["X-DSM-AE-Token"] = tok.value;
+    }}
+    return headers;
+  }}
+
+  function persistForm() {{
+    const data = {{}};
+    document.querySelectorAll("[data-persist]").forEach((el) => {{
+      const k = el.getAttribute("data-persist");
+      if (el.type === "checkbox") data[k] = el.checked;
+      else data[k] = el.value;
+    }});
+    try {{ sessionStorage.setItem(STORAGE_KEY, JSON.stringify(data)); }} catch (e) {{}}
+  }}
+
+  function restoreForm() {{
+    let data = null;
+    try {{ data = JSON.parse(sessionStorage.getItem(STORAGE_KEY) || "null"); }} catch (e) {{}}
+    if (!data) return;
+    document.querySelectorAll("[data-persist]").forEach((el) => {{
+      const k = el.getAttribute("data-persist");
+      if (!(k in data)) return;
+      if (el.type === "checkbox") el.checked = !!data[k];
+      else if (data[k] !== undefined && data[k] !== null) el.value = data[k];
+    }});
+  }}
+
+  function esc(s) {{
+    return String(s == null ? "" : s)
+      .replace(/&/g, "&amp;").replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+  }}
+
+  function badge(status) {{
+    return '<span class="status st-' + esc(status) + '">' + esc(status) + "</span>";
+  }}
+
+  function renderJobs(jobs) {{
+    const tbody = document.getElementById("jobs-body");
+    if (!jobs || !jobs.length) {{
+      tbody.innerHTML = '<tr><td colspan="9" style="color:#666">No jobs yet — enqueue below.</td></tr>';
+      return;
+    }}
+    tbody.innerHTML = jobs.map((j) => {{
+      const packs = (j.packs && j.packs.length) ? j.packs.join(",") : "—";
+      let err = j.error || "";
+      if (err.length > 120) err = err.slice(0, 120) + "…";
+      let actions = "";
+      if (j.status === "queued") {{
+        actions = '<button type="button" class="action" data-act="cancel" data-id="' +
+          esc(j.id) + '">cancel</button>';
+      }} else if (j.status === "failed" || j.status === "cancelled") {{
+        actions = '<button type="button" class="action" data-act="retry" data-id="' +
+          esc(j.id) + '">retry</button>';
+      }}
+      return "<tr>" +
+        '<td><code title="' + esc(j.id) + '">' + esc(j.id.slice(0, 8)) + "</code></td>" +
+        "<td>" + badge(j.status) + "</td>" +
+        "<td><code>" + esc(j.model) + "</code></td>" +
+        "<td>" + esc(j.k) + "</td>" +
+        '<td style="max-width:180px;overflow:hidden;text-overflow:ellipsis">' + esc(packs) + "</td>" +
+        "<td>" + esc(j.label || "") + "</td>" +
+        '<td style="font-size:11px">' + esc(j.created_at || "") + "</td>" +
+        '<td style="font-size:11px;color:#a00">' + esc(err) + "</td>" +
+        "<td>" + actions + "</td></tr>";
+    }}).join("");
+  }}
+
+  async function refreshJobs() {{
+    try {{
+      const res = await fetch(API_JOBS + "?limit=100", {{ cache: "no-store" }});
+      if (!res.ok) throw new Error("HTTP " + res.status);
+      const jobs = await res.json();
+      renderJobs(jobs);
+      const u = document.getElementById("jobs-updated");
+      u.textContent = "· updated " + new Date().toLocaleTimeString();
+      u.className = "hint ok";
+    }} catch (e) {{
+      const u = document.getElementById("jobs-updated");
+      u.textContent = "· refresh failed";
+      u.className = "hint err";
+    }}
+  }}
+
+  async function jobAction(act, id, btn) {{
+    if (AUTH_REQUIRED) {{
+      const tok = document.getElementById("token");
+      if (!tok || !tok.value) {{
+        flash("Token required for " + act, false);
+        return;
+      }}
+    }}
+    if (btn) btn.disabled = true;
+    try {{
+      const res = await fetch(API_JOBS + "/" + encodeURIComponent(id) + "/" + act, {{
+        method: "POST",
+        headers: authHeaders(),
+      }});
+      if (!res.ok) {{
+        const t = await res.text();
+        flash(act + " failed: " + res.status + " " + t, false);
+        // Refresh so buttons match reality (e.g. job already finished).
+        await refreshJobs();
+        return;
+      }}
+      flash(act + " ok", true);
+      await refreshJobs();
+    }} catch (e) {{
+      flash(String(e), false);
+      await refreshJobs();
+    }} finally {{
+      if (btn) btn.disabled = false;
+    }}
+  }}
+
+  document.getElementById("jobs-body").addEventListener("click", (ev) => {{
+    const btn = ev.target.closest("button[data-act]");
+    if (!btn) return;
+    jobAction(btn.getAttribute("data-act"), btn.getAttribute("data-id"), btn);
+  }});
+
+  const form = document.getElementById("enqueue-form");
+  form.addEventListener("input", persistForm);
+  form.addEventListener("change", persistForm);
+
+  form.addEventListener("submit", async (ev) => {{
+    ev.preventDefault();
+    persistForm();
+    if (AUTH_REQUIRED) {{
+      const tok = document.getElementById("token");
+      if (!tok || !tok.value) {{
+        flash("Token required to enqueue", false);
+        return;
+      }}
+    }}
+    const btn = document.getElementById("enqueue-btn");
+    btn.disabled = true;
+    try {{
+      const fd = new FormData(form);
+      // Prefer JSON API so we can keep the form without a full navigation.
+      const packsCsv = (fd.get("packs") || "").toString().trim();
+      const body = {{
+        model: (fd.get("model") || "").toString().trim(),
+        packs_csv: packsCsv || null,
+        k: parseInt(fd.get("k") || "3", 10),
+        concurrency: parseInt(fd.get("concurrency") || "1", 10),
+        priority: parseInt(fd.get("priority") || "0", 10),
+        full_suite: fd.get("full_suite") != null,
+        label: ((fd.get("label") || "").toString().trim() || null),
+      }};
+      const res = await fetch(API_JOBS, {{
+        method: "POST",
+        headers: Object.assign({{ "Content-Type": "application/json" }}, authHeaders()),
+        body: JSON.stringify(body),
+      }});
+      if (!res.ok) {{
+        const t = await res.text();
+        flash("Enqueue failed: " + res.status + " " + t, false);
+        return;
+      }}
+      const job = await res.json();
+      flash("Enqueued " + (job.id || "").slice(0, 8) + " · " + job.model, true);
+      // Clear model/label after success so re-submit is intentional; keep token/k/etc.
+      const model = document.getElementById("f-model");
+      const label = document.getElementById("f-label");
+      if (model) model.value = "";
+      if (label) label.value = "";
+      persistForm();
+      await refreshJobs();
+    }} catch (e) {{
+      flash(String(e), false);
+    }} finally {{
+      btn.disabled = false;
+    }}
+  }});
+
+  restoreForm();
+  refreshJobs();
+  setInterval(refreshJobs, POLL_MS);
+}})();
 </script>
 </body>
 </html>
