@@ -159,7 +159,12 @@ def diagnose_batch_cmd(
     out_dir: Path = typer.Option(Path("reports"), "--out-dir"),
     rpm: Optional[float] = typer.Option(None, "--rpm"),
 ) -> None:
-    """Run diagnose for multiple models sequentially (stable)."""
+    """Run diagnose for multiple models sequentially (stable).
+
+    Still supported for one-shot offline batches. For multi-model work prefer the
+    durable queue: ``dsm-ae queue enqueue-batch`` + ``dsm-ae worker`` (or
+    ``scripts/run_full_suite_via_queue.sh``).
+    """
     out_dir.mkdir(parents=True, exist_ok=True)
     pack_list = [x.strip() for x in packs.split(",")] if packs else None
     model_list = [m.strip() for m in models.split(",") if m.strip()]

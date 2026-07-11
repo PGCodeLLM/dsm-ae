@@ -63,7 +63,70 @@ When `--concurrency N` (or `-j N`) is set:
 3. Share one `ModelClient` wrapped in a lock (serialize actual HTTP calls if N>1) *or* serialize via lock on `complete()`
 4. Optional `--rpm` / models.yaml `rpm` spaces **job starts** (rate limit), not connection reuse
 
-So: batching is **job-level parallelism** over disorders/trials, not a connection pool. Multi-model parallelism is `diagnose-batch` (models sequential by default for stability) or multiple processes.
+So: batching is **job-level parallelism** over disorders/trials, not a connection pool. Multi-model work should use the **evaluation queue** (below). `diagnose-batch` still runs models sequentially in-process and is fine for small offline batches.
+
+## Queued evaluation
+
+Preferred path for multi-model suites: **enqueue jobs → worker drains queue → HTML matrix updates**.
+
+| Layer | Responsibility | Source of truth |
+|-------|----------------|-----------------|
+| **Model registry** | How to call a model (`api_base`, key, `rpm`) | `models.yaml` (credentials / rate limits only; gitignored) |
+| **Eval job** | What to run (model id, packs, `k`, concurrency, label) | SQLite `data/queue.db` |
+| **Artifacts** | Results for comparison | `reports/` JSON + MD; matrix `reports/dsm-ae-matrix.html` |
+
+Jobs never store API keys. Copy `models.yaml.example` → `models.yaml` and fill credentials before live runs.
+
+### Flow
+
+```bash
+# 1) Enqueue (intent only — no API calls yet)
+dsm-ae queue enqueue -m mock/well_attuned -p hello_metacog --k 2 --label demo
+dsm-ae queue enqueue-batch -m mock/well_attuned,mock/overeager --full-suite --k 1
+
+# 2) Inspect
+dsm-ae queue list
+dsm-ae queue status <job-id-or-prefix>
+
+# 3) Worker: claim → diagnose → write reports → rebuild matrix
+# Offline mock (no models.yaml):
+dsm-ae worker --reports-dir reports --once
+
+# Live models (credentials from models.yaml only):
+dsm-ae worker --models-yaml models.yaml --reports-dir reports --once
+# Long-running drain (poll when idle):
+dsm-ae worker --models-yaml models.yaml --reports-dir reports
+
+# 4) Open comparison matrix
+# reports/dsm-ae-matrix.html
+```
+
+Cancel / retry:
+
+```bash
+dsm-ae queue cancel <job-id>
+dsm-ae queue retry <job-id>    # failed or cancelled only
+```
+
+### Full suite helper
+
+`scripts/run_full_suite_via_queue.sh` enqueues `--full-suite` for each model and runs `worker --once`:
+
+```bash
+# Default models: Beta_pangu_92b Beta_pangu_505b (needs models.yaml)
+./scripts/run_full_suite_via_queue.sh
+
+# Explicit models / offline mock
+./scripts/run_full_suite_via_queue.sh mock/well_attuned mock/overeager
+MODELS="gpt-5.6-terra gpt-5.6-sol" K=3 J=2 RPM=6 ./scripts/run_full_suite_via_queue.sh
+
+# Enqueue only (worker already running elsewhere)
+SKIP_WORKER=1 ./scripts/run_full_suite_via_queue.sh gpt-5.6-luna
+```
+
+Legacy offline loops (`scripts/run_full_suite_pangu.sh`, `run_full_suite_claude.sh`, …) still call `dsm-ae diagnose` directly; leave them for in-flight runs. New multi-model work should use the queue.
+
+`dsm-ae diagnose-batch --models a,b,c` remains available (sequential, no persistence). Prefer `queue enqueue-batch` + `worker` when you need pause/resume, status, or automatic matrix rebuilds.
 
 ## Disorder rule
 
@@ -91,13 +154,18 @@ src/dsm_ae/
   adapters/raw_loop.py
   packs/              # indicator protocols
   metrics/bootstrap.py
+  queue/              # SQLite job store + worker
   criteria.py
   diagnose.py
   report.py
   cli.py
+scripts/
+  run_full_suite_via_queue.sh   # preferred multi-model suite entry
 tests/
 taxonomy/             # 158-pattern survey taxonomy
-reports/              # sample mock runs
+reports/              # sample mock runs + matrix HTML
+data/queue.db         # eval job queue (created on first enqueue; local)
+models.yaml           # credentials / rpm only (gitignored; see models.yaml.example)
 ```
 
 ## Design principles
