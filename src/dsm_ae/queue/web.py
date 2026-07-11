@@ -388,15 +388,28 @@ def create_app(
                     "incorrect api",
                 )
             )
-            hint = (
-                " Check model API base URL and API key (LiteLLM credentials) — "
-                "this is not the DSM-AE queue token."
-                if authish
-                else ""
+            timeoutish = any(
+                k in lower for k in ("timeout", "timed out", "deadline", "read timed")
             )
+            if timeoutish:
+                hint = (
+                    " The model host did not respond in time (down, overloaded, or "
+                    "blocked by proxy). This is an inference-endpoint problem — not "
+                    "the DSM-AE queue token."
+                )
+                code = "endpoint_timeout"
+            elif authish:
+                hint = (
+                    " Check model API base URL and API key (LiteLLM credentials) — "
+                    "this is not the DSM-AE queue token."
+                )
+                code = "endpoint_auth_or_network_error"
+            else:
+                hint = ""
+                code = "endpoint_error"
             return {
                 "ok": False,
-                "code": "endpoint_auth_or_network_error" if authish else "endpoint_error",
+                "code": code,
                 "message": f"Inference endpoint error: {err}.{hint}",
             }
 

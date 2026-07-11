@@ -496,41 +496,63 @@ def render_queue_page(store: JobStore, href, auth_required: bool, title: str) ->
       return;
     }}
     const btn = document.getElementById("test-conn-btn");
-    btn.disabled = true; connMsg("Testing inference endpoint…", true);
+    btn.disabled = true;
+    const t0 = performance.now();
+    connMsg("Testing inference endpoint (max ~45s)…", true);
     try {{
+      // Cap probe timeout so a dead host does not hang the UI for 120s.
+      const formTimeout = parseFloat(document.getElementById("f-timeout").value || "45");
       const body = {{
         model: (document.getElementById("f-model").value || "").trim(),
         api_base: (document.getElementById("f-api-base").value || "").trim() || null,
         api_key: (document.getElementById("f-api-key").value || "").trim() || null,
-        timeout: parseFloat(document.getElementById("f-timeout").value || "30"),
+        timeout: Math.min(Math.max(formTimeout || 45, 5), 45),
         num_retries: 0,
       }};
       if (!body.model) {{ connMsg("Enter a model id", false); return; }}
-      const res = await fetch(API_TEST, {{
-        method: "POST",
-        headers: Object.assign({{"Content-Type":"application/json"}}, authHeaders()),
-        credentials: "same-origin",
-        body: JSON.stringify(body),
-      }});
-      const data = await res.json().catch(() => ({{ ok: false, message: res.statusText }}));
+      const controller = new AbortController();
+      const kill = setTimeout(() => controller.abort(), (body.timeout + 10) * 1000);
+      let res, data;
+      try {{
+        res = await fetch(API_TEST, {{
+          method: "POST",
+          headers: Object.assign({{"Content-Type":"application/json"}}, authHeaders()),
+          credentials: "same-origin",
+          body: JSON.stringify(body),
+          signal: controller.signal,
+        }});
+        data = await res.json().catch(() => ({{ ok: false, message: res.statusText }}));
+      }} finally {{
+        clearTimeout(kill);
+      }}
+      const ms = Math.round(performance.now() - t0);
       if (!res.ok) {{
-        // Queue-token failure vs other HTTP errors
-        connMsg(formatApiError(res, data, "Test connection"), false);
+        connMsg(formatApiError(res, data, "Test connection") + " (" + ms + "ms)", false);
         return;
       }}
-      // 200: inference probe result (ok true/false) — never confuses with queue token
       if (data.ok) {{
         rememberQueueTokenIfPresent();
-        connMsg(data.message || "Inference endpoint OK", true);
+        connMsg((data.message || "Inference endpoint OK") + " (" + ms + "ms)", true);
       }} else {{
         connMsg(
-          data.message
-            || "Inference endpoint error (model API base/key) — queue token was accepted.",
+          (data.message
+            || "Inference endpoint error (model API base/key) — queue token was accepted.")
+            + " (" + ms + "ms)",
           false
         );
       }}
     }} catch (e) {{
-      connMsg(String(e), false);
+      const ms = Math.round(performance.now() - t0);
+      const name = (e && e.name) || "";
+      if (name === "AbortError") {{
+        connMsg(
+          "Inference endpoint test aborted after timeout — host may be down, "
+          + "unreachable, or stuck behind a proxy. Queue token is separate. (" + ms + "ms)",
+          false
+        );
+      }} else {{
+        connMsg(String(e) + " (" + ms + "ms)", false);
+      }}
     }} finally {{ btn.disabled = false; }}
   }});
 
