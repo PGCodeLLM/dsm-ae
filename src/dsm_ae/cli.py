@@ -436,5 +436,54 @@ def _resolve_job_id(store, job_id: str) -> str:
     raise typer.Exit(1)
 
 
+@app.command("worker")
+def worker_cmd(
+    db: Path = typer.Option(_DEFAULT_DB, "--db", help="SQLite queue database path"),
+    models_yaml: Optional[Path] = typer.Option(
+        None, "--models-yaml", help="LiteLLM models.yaml (credentials; never stored on jobs)"
+    ),
+    reports_dir: Path = typer.Option(
+        Path("reports"), "--reports-dir", help="Report root (queue/ + matrix HTML)"
+    ),
+    once: bool = typer.Option(
+        False, "--once", help="Drain queued jobs then exit (no poll loop)"
+    ),
+    poll: float = typer.Option(2.0, "--poll", help="Seconds to sleep when queue is empty"),
+    worker_id: Optional[str] = typer.Option(
+        None, "--worker-id", help="Worker identity recorded on claimed jobs"
+    ),
+    rebuild_html: bool = typer.Option(
+        True,
+        "--rebuild-html/--no-rebuild-html",
+        help="Rebuild dsm-ae-matrix.html after each success",
+    ),
+    matrix_out: Optional[Path] = typer.Option(
+        None, "--matrix-out", help="HTML matrix path (default: reports-dir/dsm-ae-matrix.html)"
+    ),
+) -> None:
+    """Claim queued jobs, run diagnose, write reports, optionally rebuild matrix."""
+    from dsm_ae.queue.store import JobStore
+    from dsm_ae.queue.worker import default_worker_id, run_loop
+
+    wid = worker_id or default_worker_id()
+    store = JobStore(db)
+    console.print(
+        f"[bold]DSM-AE worker[/bold] id={wid} db={db} reports={reports_dir} "
+        f"once={once} poll={poll}s yaml={models_yaml}"
+    )
+    run_loop(
+        store,
+        worker_id=wid,
+        reports_dir=reports_dir,
+        models_yaml=models_yaml,
+        once=once,
+        poll_s=poll,
+        rebuild_html=rebuild_html,
+        matrix_out=matrix_out,
+    )
+    if once:
+        console.print("[dim]worker idle — exiting (--once)[/dim]")
+
+
 if __name__ == "__main__":
     app()
