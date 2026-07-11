@@ -153,3 +153,37 @@ def test_queue_status_missing(tmp_path: Path):
     )
     assert result.exit_code == 1
     assert "not found" in result.output.lower()
+
+
+def test_queue_reclaim(tmp_path: Path):
+    from datetime import datetime, timedelta, timezone
+
+    db = tmp_path / "q.db"
+    store = JobStore(db)
+    jid = store.enqueue(model="mock/x", packs=["hello_metacog"])
+    store.claim_next(worker_id="w1")
+    old = (datetime.now(timezone.utc) - timedelta(seconds=7200)).isoformat()
+    store._conn.execute(
+        "UPDATE eval_jobs SET started_at=? WHERE id=?",
+        (old, jid),
+    )
+    store._conn.commit()
+
+    result = runner.invoke(
+        app, ["queue", "reclaim", "--stale-seconds", "3600", "--db", str(db)]
+    )
+    assert result.exit_code == 0, result.output
+    assert "reclaimed" in result.output.lower()
+    assert "1" in result.output
+    job = store.get(jid)
+    assert job is not None
+    assert job.status == JobStatus.FAILED
+    assert job.error is not None
+    assert "stale" in job.error.lower()
+
+    # Nothing left to reclaim
+    result2 = runner.invoke(
+        app, ["queue", "reclaim", "--stale-seconds", "3600", "--db", str(db)]
+    )
+    assert result2.exit_code == 0, result2.output
+    assert "0" in result2.output

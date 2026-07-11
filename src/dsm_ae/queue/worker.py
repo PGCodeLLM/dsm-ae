@@ -28,14 +28,21 @@ def run_one(
     rebuild_html: bool = True,
     matrix_out: Path | None = None,
 ) -> bool | None:
-    """Claim and run at most one job. True=ran ok, False=ran fail, None=idle."""
+    """Claim and run at most one job. True=ran ok, False=ran fail, None=idle.
+
+    On failure the job is marked failed (no auto-retry). ``max_attempts`` is
+    reserved for a future auto-retry policy; use ``queue retry`` to re-queue
+    manually. Prefer job.out_md / job.out_json when set, else default paths.
+    """
     job = store.claim_next(worker_id)
     if job is None:
         return None
     reports_dir = Path(reports_dir)
-    md_path, json_path = job_report_paths(
+    default_md, default_json = job_report_paths(
         reports_dir, job.id, job.model, job.label
     )
+    md_path = Path(job.out_md) if job.out_md else default_md
+    json_path = Path(job.out_json) if job.out_json else default_json
     work = Path(job.work_dir) if job.work_dir else reports_dir / "work" / job.id[:8]
     try:
         report = diagnose(
@@ -73,8 +80,24 @@ def run_loop(
     poll_s: float = 2.0,
     rebuild_html: bool = True,
     matrix_out: Path | None = None,
-) -> None:
-    """Process jobs serially. With once=True, drain until idle then return."""
+    stale_seconds: float = 3600,
+) -> int:
+    """Process jobs serially. With once=True, drain until idle then return.
+
+    Before claiming, marks long-running jobs failed via ``requeue_stale`` so a
+    crashed worker's claims can be retried with ``queue retry``. Pass
+    ``stale_seconds=0`` to skip reclaim. Returns the number of stale jobs
+    reclaimed at start.
+    """
+    reclaimed = 0
+    if stale_seconds > 0:
+        reclaimed = store.requeue_stale(stale_seconds=stale_seconds)
+        if reclaimed:
+            print(
+                f"Reclaimed {reclaimed} stale running job(s) "
+                f"(stale_seconds={stale_seconds:g})",
+                file=sys.stderr,
+            )
     while True:
         result = run_one(
             store,
@@ -86,8 +109,9 @@ def run_loop(
         )
         if result is None:
             if once:
-                return
+                return reclaimed
             time.sleep(poll_s)
+    return reclaimed  # pragma: no cover — infinite poll loop
 
 
 def _rebuild_matrix(reports_dir: Path, matrix_out: Path | None) -> None:

@@ -88,7 +88,7 @@ dsm-ae queue enqueue-batch -m mock/well_attuned,mock/overeager --full-suite --k 
 dsm-ae queue list
 dsm-ae queue status <job-id-or-prefix>
 
-# 3) Worker: claim → diagnose → write reports → rebuild matrix
+# 3) Worker: reclaim stale running → claim → diagnose → write reports → rebuild matrix
 # Offline mock (no models.yaml):
 dsm-ae worker --reports-dir reports --once
 
@@ -96,6 +96,9 @@ dsm-ae worker --reports-dir reports --once
 dsm-ae worker --models-yaml models.yaml --reports-dir reports --once
 # Long-running drain (poll when idle):
 dsm-ae worker --models-yaml models.yaml --reports-dir reports
+# Crash recovery: mark running jobs older than N seconds failed (default 3600; 0 = skip)
+dsm-ae worker --stale-seconds 3600 --once
+dsm-ae queue reclaim --stale-seconds 3600
 
 # 4) Open comparison matrix
 # reports/dsm-ae-matrix.html
@@ -105,8 +108,10 @@ Cancel / retry:
 
 ```bash
 dsm-ae queue cancel <job-id>
-dsm-ae queue retry <job-id>    # failed or cancelled only
+dsm-ae queue retry <job-id>    # failed or cancelled only (manual retry)
 ```
+
+**Retry policy:** the worker does **not** auto-retry on failure. `max_attempts` is stored and shown in `queue status` but reserved for a future auto-retry policy. Use `queue retry` after a failed (or cancelled) job, including jobs marked failed by stale reclaim after a crashed worker.
 
 ### Full suite helper
 

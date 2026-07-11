@@ -339,7 +339,11 @@ def queue_status(
     job_id: str = typer.Argument(..., help="Job id (full or unique prefix)"),
     db: Path = typer.Option(_DEFAULT_DB, "--db"),
 ) -> None:
-    """Show details for one job."""
+    """Show details for one job.
+
+    attempt/max_attempts: max_attempts is reserved for future auto-retry;
+    failures stay failed until you run ``queue retry`` (manual retry only).
+    """
     from dsm_ae.queue.store import JobStore
 
     store = JobStore(db)
@@ -406,7 +410,7 @@ def queue_retry(
     job_id: str = typer.Argument(...),
     db: Path = typer.Option(_DEFAULT_DB, "--db"),
 ) -> None:
-    """Re-queue a failed or cancelled job."""
+    """Re-queue a failed or cancelled job (manual retry; no auto-retry on fail)."""
     from dsm_ae.queue.store import JobStore
 
     store = JobStore(db)
@@ -423,6 +427,29 @@ def queue_retry(
                 "only failed/cancelled)"
             )
         raise typer.Exit(1)
+
+
+@queue_app.command("reclaim")
+def queue_reclaim(
+    stale_seconds: float = typer.Option(
+        3600,
+        "--stale-seconds",
+        help="Mark running jobs older than this many seconds as failed",
+    ),
+    db: Path = typer.Option(_DEFAULT_DB, "--db"),
+) -> None:
+    """Mark long-running (likely crashed) jobs failed so they can be retried."""
+    from dsm_ae.queue.store import JobStore
+
+    if stale_seconds <= 0:
+        console.print("[yellow]stale-seconds must be > 0[/yellow]")
+        raise typer.Exit(1)
+    store = JobStore(db)
+    n = store.requeue_stale(stale_seconds=stale_seconds)
+    console.print(
+        f"reclaimed [bold]{n}[/bold] stale running job(s) "
+        f"(stale_seconds={stale_seconds:g})"
+    )
 
 
 def _resolve_job_id(store, job_id: str) -> str:
@@ -465,8 +492,20 @@ def worker_cmd(
     matrix_out: Optional[Path] = typer.Option(
         None, "--matrix-out", help="HTML matrix path (default: reports-dir/dsm-ae-matrix.html)"
     ),
+    stale_seconds: float = typer.Option(
+        3600,
+        "--stale-seconds",
+        help=(
+            "Before claiming, mark running jobs older than this as failed "
+            "(crash recovery). 0 disables reclaim."
+        ),
+    ),
 ) -> None:
-    """Claim queued jobs, run diagnose, write reports, optionally rebuild matrix."""
+    """Claim queued jobs, run diagnose, write reports, optionally rebuild matrix.
+
+    On start, reclaims stale running jobs (see --stale-seconds). Failures are
+    not auto-retried (max_attempts reserved for future use); use queue retry.
+    """
     from dsm_ae.queue.store import JobStore
     from dsm_ae.queue.worker import default_worker_id, run_loop
 
@@ -474,9 +513,9 @@ def worker_cmd(
     store = JobStore(db)
     console.print(
         f"[bold]DSM-AE worker[/bold] id={wid} db={db} reports={reports_dir} "
-        f"once={once} poll={poll}s yaml={models_yaml}"
+        f"once={once} poll={poll}s stale_seconds={stale_seconds:g} yaml={models_yaml}"
     )
-    run_loop(
+    reclaimed = run_loop(
         store,
         worker_id=wid,
         reports_dir=reports_dir,
@@ -485,7 +524,10 @@ def worker_cmd(
         poll_s=poll,
         rebuild_html=rebuild_html,
         matrix_out=matrix_out,
+        stale_seconds=stale_seconds,
     )
+    if reclaimed:
+        console.print(f"[dim]reclaimed {reclaimed} stale running job(s) at start[/dim]")
     if once:
         console.print("[dim]worker idle — exiting (--once)[/dim]")
 
