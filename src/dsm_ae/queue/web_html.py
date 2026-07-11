@@ -30,10 +30,12 @@ def render_queue_page(store: JobStore, href, auth_required: bool, title: str) ->
     token_row = ""
     if auth_required:
         token_row = """
-        <label>Queue token
-          <input type="password" name="token" id="token" placeholder="shared token for enqueue"
-                 autocomplete="off" data-persist="token"/>
+        <label>Queue token <span class="hint">(UI auth — not the model API key)</span>
+          <input type="password" name="token" id="token"
+                 placeholder="DSM_AE_QUEUE_TOKEN — not LiteLLM api_key"
+                 autocomplete="off"/>
         </label>
+        <p class="hint" id="token-status"></p>
         """
     return f"""<!DOCTYPE html>
 <html lang="en">
@@ -230,6 +232,9 @@ def render_queue_page(store: JobStore, href, auth_required: bool, title: str) ->
   const formEl = document.getElementById("enqueue-form");
   if (formEl) formEl.setAttribute("action", href("/queue"));
 
+  const TOKEN_COOKIE = "dsm_ae_queue_token";
+  const TOKEN_COOKIE_DAYS = 14;
+
   function flash(msg, ok) {{
     const el = document.getElementById("flash");
     el.textContent = msg || "";
@@ -240,14 +245,78 @@ def render_queue_page(store: JobStore, href, auth_required: bool, title: str) ->
     el.textContent = msg || "";
     el.className = msg ? (ok ? "ok" : "err") : "";
   }}
+  function tokenStatus(msg, ok) {{
+    const el = document.getElementById("token-status");
+    if (!el) return;
+    el.textContent = msg || "";
+    el.className = "hint" + (msg ? (ok ? " ok" : " err") : "");
+  }}
+
+  function getCookie(name) {{
+    const parts = ("; " + document.cookie).split("; " + name + "=");
+    if (parts.length !== 2) return "";
+    return decodeURIComponent(parts.pop().split(";").shift() || "");
+  }}
+  function setQueueTokenCookie(value) {{
+    if (!value) return;
+    const maxAge = TOKEN_COOKIE_DAYS * 24 * 60 * 60;
+    // Path must cover funnel prefix and root so both local and /dsm-ae work.
+    const path = BASE || "/";
+    document.cookie = TOKEN_COOKIE + "=" + encodeURIComponent(value)
+      + "; path=" + path
+      + "; max-age=" + maxAge
+      + "; SameSite=Lax";
+    // Also set on / so non-prefixed routes work when dual-accessed.
+    if (path !== "/") {{
+      document.cookie = TOKEN_COOKIE + "=" + encodeURIComponent(value)
+        + "; path=/; max-age=" + maxAge + "; SameSite=Lax";
+    }}
+  }}
+  function getQueueToken() {{
+    const el = document.getElementById("token");
+    const fromInput = el && el.value ? el.value.trim() : "";
+    if (fromInput) return fromInput;
+    return (getCookie(TOKEN_COOKIE) || "").trim();
+  }}
+  function rememberQueueTokenIfPresent() {{
+    const t = getQueueToken();
+    if (t) {{
+      setQueueTokenCookie(t);
+      const el = document.getElementById("token");
+      if (el && !el.value) el.value = t;
+      tokenStatus("Queue token saved in cookie for this browser (" + TOKEN_COOKIE_DAYS + " days).", true);
+    }}
+  }}
   function authHeaders() {{
     const headers = {{}};
-    const tok = document.getElementById("token");
-    if (tok && tok.value) {{
-      headers["Authorization"] = "Bearer " + tok.value;
-      headers["X-DSM-AE-Token"] = tok.value;
+    const tok = getQueueToken();
+    if (tok) {{
+      headers["Authorization"] = "Bearer " + tok;
+      headers["X-DSM-AE-Token"] = tok;
     }}
     return headers;
+  }}
+
+  /** Parse FastAPI / fetch errors; distinguish queue token vs inference endpoint. */
+  function formatApiError(res, data, context) {{
+    const ctx = context || "request";
+    const detail = data && data.detail;
+    if (res && res.status === 401) {{
+      if (detail && typeof detail === "object" && detail.message) {{
+        return detail.message;
+      }}
+      if (typeof detail === "string") {{
+        return "Queue UI authentication failed: " + detail
+          + " (queue token — not the model API key).";
+      }}
+      return "Queue UI authentication failed (HTTP 401). "
+        + "Enter the DSM-AE queue token (DSM_AE_QUEUE_TOKEN), not the model API key.";
+    }}
+    if (detail && typeof detail === "object" && detail.message) return detail.message;
+    if (typeof detail === "string") return detail;
+    if (data && data.message) return data.message;
+    if (data && data.ok === false && data.message) return data.message;
+    return ctx + " failed" + (res ? " (HTTP " + res.status + ")" : "");
   }}
 
   const dd = document.getElementById("pack-dd");
@@ -292,22 +361,35 @@ def render_queue_page(store: JobStore, href, auth_required: bool, title: str) ->
     data.packs = selectedPacks();
     data.full_suite = fullCb.checked;
     try {{ sessionStorage.setItem(STORAGE_KEY, JSON.stringify(data)); }} catch (e) {{}}
+    // Keep queue token in cookie (not sessionStorage) once entered.
+    const tokEl = document.getElementById("token");
+    if (tokEl && tokEl.value.trim()) setQueueTokenCookie(tokEl.value.trim());
   }}
   function restoreForm() {{
     let data = null;
     try {{ data = JSON.parse(sessionStorage.getItem(STORAGE_KEY) || "null"); }} catch (e) {{}}
-    if (!data) return;
-    document.querySelectorAll("[data-persist]").forEach((el) => {{
-      const k = el.getAttribute("data-persist");
-      if (!(k in data)) return;
-      if (el.type === "checkbox") el.checked = !!data[k];
-      else if (data[k] != null) el.value = data[k];
-    }});
-    if (Array.isArray(data.packs)) {{
-      const set = new Set(data.packs);
-      document.querySelectorAll(".pack-cb").forEach((c) => {{ c.checked = set.has(c.value); }});
+    if (data) {{
+      document.querySelectorAll("[data-persist]").forEach((el) => {{
+        const k = el.getAttribute("data-persist");
+        if (!(k in data)) return;
+        if (el.type === "checkbox") el.checked = !!data[k];
+        else if (data[k] != null) el.value = data[k];
+      }});
+      if (Array.isArray(data.packs)) {{
+        const set = new Set(data.packs);
+        document.querySelectorAll(".pack-cb").forEach((c) => {{ c.checked = set.has(c.value); }});
+      }}
+      fullCb.checked = !!data.full_suite;
     }}
-    fullCb.checked = !!data.full_suite;
+    // Prefer cookie for queue token so the field is filled across visits.
+    const tokEl = document.getElementById("token");
+    if (tokEl) {{
+      const cookieTok = getCookie(TOKEN_COOKIE);
+      if (cookieTok) {{
+        tokEl.value = cookieTok;
+        tokenStatus("Queue token loaded from cookie.", true);
+      }}
+    }}
     updatePackLabel();
   }}
 
@@ -376,19 +458,21 @@ def render_queue_page(store: JobStore, href, auth_required: bool, title: str) ->
   }}
 
   async function jobAction(act, id, btn) {{
-    if (AUTH_REQUIRED) {{
-      const tok = document.getElementById("token");
-      if (!tok || !tok.value) {{ flash("Token required for " + act, false); return; }}
+    if (AUTH_REQUIRED && !getQueueToken()) {{
+      flash("Queue UI token required for " + act + " (not the model API key).", false);
+      return;
     }}
     if (btn) btn.disabled = true;
     try {{
       const res = await fetch(API_JOBS + "/" + encodeURIComponent(id) + "/" + act, {{
-        method: "POST", headers: authHeaders(),
+        method: "POST", headers: authHeaders(), credentials: "same-origin",
       }});
+      const data = await res.json().catch(() => ({{}}));
       if (!res.ok) {{
-        flash(act + " failed: " + res.status + " " + await res.text(), false);
+        flash(formatApiError(res, data, act), false);
         await refreshJobs(); return;
       }}
+      rememberQueueTokenIfPresent();
       flash(act + " ok", true);
       await refreshJobs();
     }} catch (e) {{
@@ -403,12 +487,16 @@ def render_queue_page(store: JobStore, href, auth_required: bool, title: str) ->
   }});
 
   document.getElementById("test-conn-btn").addEventListener("click", async () => {{
-    if (AUTH_REQUIRED) {{
-      const tok = document.getElementById("token");
-      if (!tok || !tok.value) {{ connMsg("Token required", false); return; }}
+    if (AUTH_REQUIRED && !getQueueToken()) {{
+      connMsg(
+        "Queue UI token required before testing the inference endpoint "
+        + "(enter DSM_AE_QUEUE_TOKEN — this is not the model API key).",
+        false
+      );
+      return;
     }}
     const btn = document.getElementById("test-conn-btn");
-    btn.disabled = true; connMsg("Testing…", true);
+    btn.disabled = true; connMsg("Testing inference endpoint…", true);
     try {{
       const body = {{
         model: (document.getElementById("f-model").value || "").trim(),
@@ -421,14 +509,26 @@ def render_queue_page(store: JobStore, href, auth_required: bool, title: str) ->
       const res = await fetch(API_TEST, {{
         method: "POST",
         headers: Object.assign({{"Content-Type":"application/json"}}, authHeaders()),
+        credentials: "same-origin",
         body: JSON.stringify(body),
       }});
       const data = await res.json().catch(() => ({{ ok: false, message: res.statusText }}));
-      if (!res.ok && data.detail) {{
-        connMsg(typeof data.detail === "string" ? data.detail : JSON.stringify(data.detail), false);
+      if (!res.ok) {{
+        // Queue-token failure vs other HTTP errors
+        connMsg(formatApiError(res, data, "Test connection"), false);
         return;
       }}
-      connMsg(data.message || (data.ok ? "OK" : "Failed"), !!data.ok);
+      // 200: inference probe result (ok true/false) — never confuses with queue token
+      if (data.ok) {{
+        rememberQueueTokenIfPresent();
+        connMsg(data.message || "Inference endpoint OK", true);
+      }} else {{
+        connMsg(
+          data.message
+            || "Inference endpoint error (model API base/key) — queue token was accepted.",
+          false
+        );
+      }}
     }} catch (e) {{
       connMsg(String(e), false);
     }} finally {{ btn.disabled = false; }}
@@ -439,9 +539,12 @@ def render_queue_page(store: JobStore, href, auth_required: bool, title: str) ->
   form.addEventListener("change", persistForm);
   form.addEventListener("submit", async (ev) => {{
     ev.preventDefault(); persistForm();
-    if (AUTH_REQUIRED) {{
-      const tok = document.getElementById("token");
-      if (!tok || !tok.value) {{ flash("Token required to enqueue", false); return; }}
+    if (AUTH_REQUIRED && !getQueueToken()) {{
+      flash(
+        "Queue UI token required to enqueue (DSM_AE_QUEUE_TOKEN — not the model API key).",
+        false
+      );
+      return;
     }}
     const btn = document.getElementById("enqueue-btn");
     btn.disabled = true;
@@ -463,14 +566,16 @@ def render_queue_page(store: JobStore, href, auth_required: bool, title: str) ->
       const res = await fetch(API_JOBS, {{
         method: "POST",
         headers: Object.assign({{"Content-Type":"application/json"}}, authHeaders()),
+        credentials: "same-origin",
         body: JSON.stringify(body),
       }});
+      const data = await res.json().catch(() => ({{}}));
       if (!res.ok) {{
-        flash("Enqueue failed: " + res.status + " " + await res.text(), false);
+        flash(formatApiError(res, data, "Enqueue"), false);
         return;
       }}
-      const job = await res.json();
-      flash("Enqueued " + (job.id || "").slice(0, 8) + " · " + job.model, true);
+      rememberQueueTokenIfPresent();
+      flash("Enqueued " + (data.id || "").slice(0, 8) + " · " + data.model, true);
       document.getElementById("f-label").value = "";
       persistForm();
       await refreshJobs();

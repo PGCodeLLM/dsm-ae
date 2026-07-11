@@ -190,6 +190,11 @@ def create_app(
         authorization: Optional[str] = Header(default=None),
         x_dsm_ae_token: Optional[str] = Header(default=None, alias="X-DSM-AE-Token"),
     ) -> None:
+        """Require the *queue UI* shared secret (not the model API key).
+
+        Accepts (first match wins): Authorization Bearer, X-DSM-AE-Token header,
+        ``token`` query param, form field (via caller), or cookie ``dsm_ae_queue_token``.
+        """
         expected = app.state.token
         if not expected:
             return
@@ -197,11 +202,35 @@ def create_app(
         if authorization and authorization.lower().startswith("bearer "):
             got = authorization[7:].strip()
         if not got:
-            got = x_dsm_ae_token
+            got = (x_dsm_ae_token or "").strip() or None
         if not got:
-            got = request.query_params.get("token")
+            got = (request.query_params.get("token") or "").strip() or None
+        if not got:
+            got = (request.cookies.get("dsm_ae_queue_token") or "").strip() or None
+        if not got:
+            raise HTTPException(
+                status_code=401,
+                detail={
+                    "code": "queue_token_missing",
+                    "message": (
+                        "Queue UI authentication required: provide the DSM-AE queue token "
+                        "(from .env DSM_AE_QUEUE_TOKEN / --token). "
+                        "This is separate from the model API key used for inference."
+                    ),
+                },
+            )
         if got != expected:
-            raise HTTPException(status_code=401, detail="Invalid or missing token")
+            raise HTTPException(
+                status_code=401,
+                detail={
+                    "code": "queue_token_invalid",
+                    "message": (
+                        "Queue UI authentication failed: the queue token is incorrect. "
+                        "This is not a model endpoint / API-key error — re-enter the "
+                        "DSM-AE queue token (DSM_AE_QUEUE_TOKEN), not the LiteLLM api_key."
+                    ),
+                },
+            )
 
     def job_to_public(job: EvalJob) -> dict[str, Any]:
         return _job_dict(job)
@@ -305,11 +334,16 @@ def create_app(
         body: ConnectionTestBody,
         _: None = Depends(require_token),
     ) -> dict[str, Any]:
+        """Probe the *inference* endpoint (model auth), after queue token is accepted."""
         model = body.model.strip()
         if model.startswith("mock/"):
             return {
                 "ok": True,
-                "message": f"Offline mock persona '{model.split('/', 1)[-1]}' — no network call",
+                "code": "endpoint_ok_mock",
+                "message": (
+                    f"Inference endpoint check skipped for offline mock persona "
+                    f"'{model.split('/', 1)[-1]}' (no network call)."
+                ),
             }
         extra: dict[str, Any] = {}
         if body.timeout is not None:
@@ -332,11 +366,39 @@ def create_app(
             text = (result.content or "").strip()
             return {
                 "ok": True,
-                "message": f"Endpoint OK — model replied: {text[:200]!r}",
+                "code": "endpoint_ok",
+                "message": f"Inference endpoint OK — model replied: {text[:200]!r}",
                 "preview": text[:200],
             }
         except Exception as e:
-            return {"ok": False, "message": f"{type(e).__name__}: {e}"}
+            err = f"{type(e).__name__}: {e}"
+            # Hint common auth failures without swallowing the real error.
+            lower = err.lower()
+            authish = any(
+                k in lower
+                for k in (
+                    "401",
+                    "403",
+                    "unauthorized",
+                    "forbidden",
+                    "invalid api",
+                    "authentication",
+                    "api key",
+                    "apikey",
+                    "incorrect api",
+                )
+            )
+            hint = (
+                " Check model API base URL and API key (LiteLLM credentials) — "
+                "this is not the DSM-AE queue token."
+                if authish
+                else ""
+            )
+            return {
+                "ok": False,
+                "code": "endpoint_auth_or_network_error" if authish else "endpoint_error",
+                "message": f"Inference endpoint error: {err}.{hint}",
+            }
 
     @app.post("/api/jobs")
     def api_enqueue(
@@ -409,16 +471,39 @@ def create_app(
         token_field: str = Form("", alias="token"),
     ) -> RedirectResponse:
         expected = app.state.token
-        if expected and token_field != expected:
-            # also accept header via dependency manually
+        if expected:
             auth = request.headers.get("authorization")
-            ok = False
-            if auth and auth.lower().startswith("bearer ") and auth[7:].strip() == expected:
-                ok = True
-            if request.headers.get("x-dsm-ae-token") == expected:
-                ok = True
-            if not ok:
-                raise HTTPException(401, "Invalid or missing token")
+            got = None
+            if token_field and token_field.strip():
+                got = token_field.strip()
+            elif auth and auth.lower().startswith("bearer "):
+                got = auth[7:].strip()
+            elif request.headers.get("x-dsm-ae-token"):
+                got = request.headers.get("x-dsm-ae-token", "").strip()
+            elif request.cookies.get("dsm_ae_queue_token"):
+                got = request.cookies.get("dsm_ae_queue_token", "").strip()
+            if not got:
+                raise HTTPException(
+                    status_code=401,
+                    detail={
+                        "code": "queue_token_missing",
+                        "message": (
+                            "Queue UI authentication required: provide the DSM-AE queue token "
+                            "(DSM_AE_QUEUE_TOKEN). This is separate from the model API key."
+                        ),
+                    },
+                )
+            if got != expected:
+                raise HTTPException(
+                    status_code=401,
+                    detail={
+                        "code": "queue_token_invalid",
+                        "message": (
+                            "Queue UI authentication failed: incorrect queue token "
+                            "(not a model endpoint auth error)."
+                        ),
+                    },
+                )
         pack_list = _parse_packs_list(
             None, packs or None, full_suite is not None and full_suite != ""
         )

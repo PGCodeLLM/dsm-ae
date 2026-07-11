@@ -91,12 +91,38 @@ def test_token_required_for_mutate(tmp_path: Path):
     with TestClient(app) as c:
         r = c.post("/api/jobs", json={"model": "mock/well_attuned", "k": 1})
         assert r.status_code == 401
+        detail = r.json()["detail"]
+        assert detail["code"] == "queue_token_missing"
+        assert "queue token" in detail["message"].lower()
+        assert "not" in detail["message"].lower() or "separate" in detail["message"].lower()
+
+        r = c.post(
+            "/api/test-connection",
+            json={"model": "mock/well_attuned"},
+            headers={"Authorization": "Bearer wrong"},
+        )
+        assert r.status_code == 401
+        detail = r.json()["detail"]
+        assert detail["code"] == "queue_token_invalid"
+        assert "incorrect" in detail["message"].lower() or "queue" in detail["message"].lower()
+        assert "model" in detail["message"].lower() or "api" in detail["message"].lower()
+
         r = c.post(
             "/api/jobs",
             json={"model": "mock/well_attuned", "k": 1},
             headers={"Authorization": "Bearer secret"},
         )
         assert r.status_code == 200
+
+        # Cookie auth works without Authorization header
+        r = c.post(
+            "/api/test-connection",
+            json={"model": "mock/well_attuned"},
+            cookies={"dsm_ae_queue_token": "secret"},
+        )
+        assert r.status_code == 200
+        assert r.json()["ok"] is True
+        assert r.json().get("code", "").startswith("endpoint_ok")
 
 
 def test_matrix_and_static(client: TestClient):
