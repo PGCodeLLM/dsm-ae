@@ -19,3 +19,4 @@ logs/
 *.bak
 .superpowers/
 data/
+.worktrees/
