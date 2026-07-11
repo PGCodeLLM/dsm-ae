@@ -532,5 +532,64 @@ def worker_cmd(
         console.print("[dim]worker idle — exiting (--once)[/dim]")
 
 
+@app.command("serve-queue")
+def serve_queue_cmd(
+    host: str = typer.Option("127.0.0.1", "--host", help="Bind address (prefer 127.0.0.1)"),
+    port: int = typer.Option(8765, "--port", help="HTTP port"),
+    db: Path = typer.Option(_DEFAULT_DB, "--db"),
+    reports_dir: Path = typer.Option(Path("reports"), "--reports-dir"),
+    models_yaml: Optional[Path] = typer.Option(
+        None, "--models-yaml", help="Credentials for optional embedded worker"
+    ),
+    public_base: str = typer.Option(
+        "",
+        "--public-base",
+        help="Browser path prefix when reverse-proxied (e.g. /dsm-ae for Tailscale funnel)",
+        envvar="DSM_AE_PUBLIC_BASE",
+    ),
+    token: Optional[str] = typer.Option(
+        None,
+        "--token",
+        help="Shared secret for enqueue/cancel/retry (env DSM_AE_QUEUE_TOKEN)",
+        envvar="DSM_AE_QUEUE_TOKEN",
+    ),
+    with_worker: bool = typer.Option(
+        False,
+        "--with-worker/--no-worker",
+        help="Run diagnose worker in a background thread",
+    ),
+    poll: float = typer.Option(2.0, "--poll", help="Worker idle poll seconds"),
+    stale_seconds: float = typer.Option(3600, "--stale-seconds"),
+) -> None:
+    """Serve queue UI + API + static reports (for local demo / Tailscale funnel)."""
+    try:
+        import uvicorn
+    except ImportError as e:
+        console.print(
+            "[red]Missing web deps.[/red] Install with: pip install 'dsm-ae[web]'"
+        )
+        raise typer.Exit(1) from e
+
+    from dsm_ae.queue.web import create_app
+
+    base = (public_base or "").rstrip("/")
+    webapp = create_app(
+        db_path=db,
+        reports_dir=reports_dir,
+        models_yaml=models_yaml,
+        public_base=base,
+        token=token,
+        with_worker=with_worker,
+        worker_poll=poll,
+        stale_seconds=stale_seconds,
+    )
+    pub = f"{base}/" if base else "/"
+    console.print(
+        f"[bold]DSM-AE queue UI[/bold] http://{host}:{port}{pub}  "
+        f"db={db} reports={reports_dir} worker={with_worker} auth={bool(token)}"
+    )
+    uvicorn.run(webapp, host=host, port=port, log_level="info")
+
+
 if __name__ == "__main__":
     app()

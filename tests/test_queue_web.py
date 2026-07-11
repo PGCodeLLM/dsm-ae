@@ -1,0 +1,109 @@
+"""Tests for the thin FastAPI eval queue UI."""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+import pytest
+
+pytest.importorskip("fastapi")
+from fastapi.testclient import TestClient
+
+from dsm_ae.queue.web import create_app
+
+
+@pytest.fixture
+def client(tmp_path: Path):
+    reports = tmp_path / "reports"
+    reports.mkdir()
+    (reports / "dsm-ae-matrix.html").write_text("<html>matrix</html>", encoding="utf-8")
+    app = create_app(
+        db_path=tmp_path / "q.db",
+        reports_dir=reports,
+        public_base="/dsm-ae",
+        token=None,
+        with_worker=False,
+    )
+    with TestClient(app) as c:
+        yield c
+
+
+def test_health_and_home(client: TestClient):
+    r = client.get("/api/health")
+    assert r.status_code == 200
+    assert r.json()["ok"] is True
+    assert r.json()["public_base"] == "/dsm-ae"
+    r = client.get("/")
+    assert r.status_code == 200
+    assert b"evaluation queue" in r.content.lower()
+    assert b'href="/dsm-ae/matrix"' in r.content or b"/dsm-ae/matrix" in r.content
+
+
+def test_enqueue_list_api(client: TestClient):
+    r = client.post(
+        "/api/jobs",
+        json={"model": "mock/well_attuned", "packs": ["hello_metacog"], "k": 2},
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert body["model"] == "mock/well_attuned"
+    assert body["status"] == "queued"
+    jid = body["id"]
+
+    r = client.get("/api/jobs")
+    assert r.status_code == 200
+    assert any(j["id"] == jid for j in r.json())
+
+    r = client.get(f"/api/jobs/{jid[:8]}")
+    assert r.status_code == 200
+    assert r.json()["id"] == jid
+
+
+def test_form_enqueue_and_cancel(client: TestClient):
+    r = client.post(
+        "/queue",
+        data={"model": "mock/overeager", "packs": "hello_metacog", "k": "1"},
+        follow_redirects=False,
+    )
+    assert r.status_code == 303
+    jobs = client.get("/api/jobs").json()
+    assert any(j["model"] == "mock/overeager" for j in jobs)
+    jid = next(j["id"] for j in jobs if j["model"] == "mock/overeager")
+    r = client.post(f"/api/jobs/{jid}/cancel")
+    assert r.status_code == 200
+    assert r.json()["status"] == "cancelled"
+
+
+def test_token_required_for_mutate(tmp_path: Path):
+    (tmp_path / "reports").mkdir()
+    app = create_app(
+        db_path=tmp_path / "q.db",
+        reports_dir=tmp_path / "reports",
+        token="secret",
+        with_worker=False,
+    )
+    with TestClient(app) as c:
+        r = c.post("/api/jobs", json={"model": "mock/well_attuned", "k": 1})
+        assert r.status_code == 401
+        r = c.post(
+            "/api/jobs",
+            json={"model": "mock/well_attuned", "k": 1},
+            headers={"Authorization": "Bearer secret"},
+        )
+        assert r.status_code == 200
+
+
+def test_matrix_and_static(client: TestClient):
+    r = client.get("/matrix", follow_redirects=False)
+    assert r.status_code == 302
+    assert r.headers["location"].endswith("/reports/dsm-ae-matrix.html")
+    r = client.get("/reports/dsm-ae-matrix.html")
+    assert r.status_code == 200
+    assert b"matrix" in r.content
+
+
+def test_packs_api(client: TestClient):
+    r = client.get("/api/packs")
+    assert r.status_code == 200
+    packs = r.json()
+    assert "hello_metacog" in packs

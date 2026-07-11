@@ -1,4 +1,4 @@
-# DSM-AE — DSM Agentic Edition
+# DSM-AE: Diagnostic and Statistical Manual - Agentic Edition
 
 **Indicator-protocol diagnostic engine** for agentic ill-behaviours.
 
@@ -103,6 +103,31 @@ dsm-ae queue reclaim --stale-seconds 3600
 # 4) Open comparison matrix
 # reports/dsm-ae-matrix.html
 ```
+
+### Web UI (queue + matrix)
+
+```bash
+pip install 'dsm-ae[web]'
+
+# Local UI (optional embedded worker). Prefer bind 127.0.0.1 and funnel publicly.
+dsm-ae serve-queue --host 127.0.0.1 --port 8765 \
+  --public-base /dsm-ae \
+  --with-worker --models-yaml models.yaml \
+  --reports-dir reports
+
+# Optional shared token for enqueue/cancel/retry (env DSM_AE_QUEUE_TOKEN)
+dsm-ae serve-queue --token "$DSM_AE_QUEUE_TOKEN" --public-base /dsm-ae --with-worker
+```
+
+Routes (app paths; with funnel path strip, browser URLs use the public base):
+
+| Path | Purpose |
+|------|---------|
+| `/` or `/queue` | Job table + enqueue form |
+| `/matrix` | Redirect to multi-model HTML matrix |
+| `/reports/…` | Static diagnosis artifacts |
+| `/api/jobs` | JSON list / POST enqueue |
+| `/docs` | OpenAPI |
 
 Cancel / retry:
 
