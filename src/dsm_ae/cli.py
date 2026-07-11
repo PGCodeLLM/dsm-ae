@@ -201,5 +201,240 @@ def html_report_cmd(
     raise SystemExit(html_main(args))
 
 
+# --- Evaluation queue -------------------------------------------------------
+
+queue_app = typer.Typer(help="Evaluation job queue")
+app.add_typer(queue_app, name="queue")
+
+_DEFAULT_DB = Path("data/queue.db")
+
+
+def _parse_packs(packs: Optional[str], full_suite: bool) -> Optional[list[str]]:
+    if full_suite:
+        return list_packs()
+    if packs:
+        return [x.strip() for x in packs.split(",") if x.strip()]
+    return None
+
+
+def _status_style(status: str) -> str:
+    return {
+        "queued": "cyan",
+        "running": "yellow",
+        "succeeded": "green",
+        "failed": "red",
+        "cancelled": "dim",
+    }.get(status, "")
+
+
+@queue_app.command("enqueue")
+def queue_enqueue(
+    model: str = typer.Option(..., "--model", "-m", help="Model id (no API keys)"),
+    packs: Optional[str] = typer.Option(None, "--packs", "-p", help="Comma-separated pack ids"),
+    k: int = typer.Option(3, "--k", help="Bootstrap trials per pack"),
+    concurrency: int = typer.Option(1, "--concurrency", "-j"),
+    rpm: Optional[float] = typer.Option(None, "--rpm"),
+    full_suite: bool = typer.Option(False, "--full-suite", help="Enqueue all registered packs"),
+    priority: int = typer.Option(0, "--priority"),
+    label: Optional[str] = typer.Option(None, "--label"),
+    db: Path = typer.Option(_DEFAULT_DB, "--db", help="SQLite queue database path"),
+) -> None:
+    """Enqueue a single diagnosis job."""
+    from dsm_ae.queue.store import JobStore
+
+    pack_list = _parse_packs(packs, full_suite)
+    store = JobStore(db)
+    jid = store.enqueue(
+        model=model,
+        packs=pack_list,
+        k=k,
+        concurrency=concurrency,
+        rpm=rpm,
+        priority=priority,
+        label=label,
+    )
+    console.print(f"enqueued [bold]{jid}[/bold] model={model}")
+
+
+@queue_app.command("enqueue-batch")
+def queue_enqueue_batch(
+    models: str = typer.Option(
+        ..., "--models", "-m", help="Comma-separated model ids"
+    ),
+    packs: Optional[str] = typer.Option(None, "--packs", "-p", help="Comma-separated pack ids"),
+    k: int = typer.Option(3, "--k"),
+    concurrency: int = typer.Option(1, "--concurrency", "-j"),
+    rpm: Optional[float] = typer.Option(None, "--rpm"),
+    full_suite: bool = typer.Option(False, "--full-suite"),
+    priority: int = typer.Option(0, "--priority"),
+    label: Optional[str] = typer.Option(None, "--label"),
+    db: Path = typer.Option(_DEFAULT_DB, "--db"),
+) -> None:
+    """Enqueue one job per model (shared packs/k/limits)."""
+    from dsm_ae.queue.store import JobStore
+
+    model_list = [m.strip() for m in models.split(",") if m.strip()]
+    if not model_list:
+        console.print("[red]No models provided[/red]")
+        raise typer.Exit(1)
+    pack_list = _parse_packs(packs, full_suite)
+    store = JobStore(db)
+    for model in model_list:
+        jid = store.enqueue(
+            model=model,
+            packs=pack_list,
+            k=k,
+            concurrency=concurrency,
+            rpm=rpm,
+            priority=priority,
+            label=label,
+        )
+        console.print(f"enqueued [bold]{jid}[/bold] model={model}")
+
+
+@queue_app.command("list")
+def queue_list(
+    limit: int = typer.Option(100, "--limit", "-n"),
+    db: Path = typer.Option(_DEFAULT_DB, "--db"),
+) -> None:
+    """List jobs (newest first)."""
+    from dsm_ae.queue.store import JobStore
+
+    store = JobStore(db)
+    jobs = store.list_jobs(limit=limit)
+    if not jobs:
+        console.print("[dim](empty queue)[/dim]")
+        return
+    table = Table(title="Eval queue", expand=False)
+    table.add_column("ID", style="bold", no_wrap=True)
+    table.add_column("Status", no_wrap=True)
+    table.add_column("Model", overflow="fold", no_wrap=True)
+    table.add_column("Priority", no_wrap=True)
+    table.add_column("k", no_wrap=True)
+    table.add_column("Label", overflow="fold")
+    table.add_column("Created", overflow="fold")
+    for j in jobs:
+        st = j.status.value
+        style = _status_style(st)
+        status_cell = f"[{style}]{st}[/{style}]" if style else st
+        table.add_row(
+            j.id[:8],
+            status_cell,
+            j.model,
+            str(j.priority),
+            str(j.k),
+            j.label or "",
+            j.created_at,
+        )
+    console.print(table)
+
+
+@queue_app.command("status")
+def queue_status(
+    job_id: str = typer.Argument(..., help="Job id (full or unique prefix)"),
+    db: Path = typer.Option(_DEFAULT_DB, "--db"),
+) -> None:
+    """Show details for one job."""
+    from dsm_ae.queue.store import JobStore
+
+    store = JobStore(db)
+    job = store.get(job_id)
+    if job is None and len(job_id) < 36:
+        # Allow short id prefix used in list output
+        matches = [j for j in store.list_jobs(limit=500) if j.id.startswith(job_id)]
+        if len(matches) == 1:
+            job = matches[0]
+        elif len(matches) > 1:
+            console.print(f"[red]Ambiguous id prefix[/red] {job_id!r} ({len(matches)} matches)")
+            raise typer.Exit(1)
+    if job is None:
+        console.print(f"[red]Job not found:[/red] {job_id}")
+        raise typer.Exit(1)
+    st = job.status.value
+    style = _status_style(st)
+    packs_s = ",".join(job.packs) if job.packs else "(all/default)"
+    console.print(f"[bold]id[/bold]         {job.id}")
+    console.print(f"[bold]status[/bold]     [{style}]{st}[/{style}]" if style else f"status     {st}")
+    console.print(f"[bold]model[/bold]      {job.model}")
+    console.print(f"[bold]packs[/bold]      {packs_s}")
+    console.print(f"[bold]k[/bold]          {job.k}")
+    console.print(f"[bold]concurrency[/bold] {job.concurrency}")
+    console.print(f"[bold]rpm[/bold]        {job.rpm}")
+    console.print(f"[bold]priority[/bold]   {job.priority}")
+    console.print(f"[bold]label[/bold]      {job.label}")
+    console.print(f"[bold]attempt[/bold]    {job.attempt}/{job.max_attempts}")
+    console.print(f"[bold]created[/bold]    {job.created_at}")
+    console.print(f"[bold]started[/bold]    {job.started_at}")
+    console.print(f"[bold]finished[/bold]   {job.finished_at}")
+    console.print(f"[bold]worker[/bold]     {job.worker_id}")
+    console.print(f"[bold]out_md[/bold]     {job.out_md}")
+    console.print(f"[bold]out_json[/bold]   {job.out_json}")
+    if job.error:
+        console.print(f"[bold red]error[/bold red]      {job.error}")
+
+
+@queue_app.command("cancel")
+def queue_cancel(
+    job_id: str = typer.Argument(...),
+    db: Path = typer.Option(_DEFAULT_DB, "--db"),
+) -> None:
+    """Cancel a queued job (no-op if running/finished)."""
+    from dsm_ae.queue.store import JobStore
+
+    store = JobStore(db)
+    resolved = _resolve_job_id(store, job_id)
+    if store.cancel(resolved):
+        console.print(f"cancelled [bold]{resolved}[/bold]")
+    else:
+        job = store.get(resolved)
+        if job is None:
+            console.print(f"[red]Job not found:[/red] {job_id}")
+        else:
+            console.print(
+                f"[yellow]cannot cancel[/yellow] {resolved} (status={job.status.value})"
+            )
+        raise typer.Exit(1)
+
+
+@queue_app.command("retry")
+def queue_retry(
+    job_id: str = typer.Argument(...),
+    db: Path = typer.Option(_DEFAULT_DB, "--db"),
+) -> None:
+    """Re-queue a failed or cancelled job."""
+    from dsm_ae.queue.store import JobStore
+
+    store = JobStore(db)
+    resolved = _resolve_job_id(store, job_id)
+    if store.retry(resolved):
+        console.print(f"re-queued [bold]{resolved}[/bold]")
+    else:
+        job = store.get(resolved)
+        if job is None:
+            console.print(f"[red]Job not found:[/red] {job_id}")
+        else:
+            console.print(
+                f"[yellow]cannot retry[/yellow] {resolved} (status={job.status.value}; "
+                "only failed/cancelled)"
+            )
+        raise typer.Exit(1)
+
+
+def _resolve_job_id(store, job_id: str) -> str:
+    """Resolve full id or unique prefix; exit on missing/ambiguous."""
+    job = store.get(job_id)
+    if job is not None:
+        return job.id
+    if len(job_id) < 36:
+        matches = [j for j in store.list_jobs(limit=500) if j.id.startswith(job_id)]
+        if len(matches) == 1:
+            return matches[0].id
+        if len(matches) > 1:
+            console.print(f"[red]Ambiguous id prefix[/red] {job_id!r} ({len(matches)} matches)")
+            raise typer.Exit(1)
+    console.print(f"[red]Job not found:[/red] {job_id}")
+    raise typer.Exit(1)
+
+
 if __name__ == "__main__":
     app()

@@ -176,3 +176,41 @@ def test_enqueue_null_packs(tmp_path: Path):
     job = store.get(jid)
     assert job is not None
     assert job.packs is None
+
+
+def test_retry_failed_and_cancelled(tmp_path: Path):
+    store = JobStore(tmp_path / "q.db")
+    jid = store.enqueue(model="mock/well_attuned", packs=["hello_metacog"])
+    store.claim_next(worker_id="w1")
+    store.mark_failed(jid, "boom")
+    failed = store.get(jid)
+    assert failed is not None
+    assert failed.status == JobStatus.FAILED
+    assert failed.error == "boom"
+    assert failed.worker_id == "w1"
+    assert failed.started_at is not None
+    assert failed.finished_at is not None
+
+    assert store.retry(jid) is True
+    again = store.get(jid)
+    assert again is not None
+    assert again.status == JobStatus.QUEUED
+    assert again.error is None
+    assert again.worker_id is None
+    assert again.started_at is None
+    assert again.finished_at is None
+
+    # Queued jobs cannot be retried
+    assert store.retry(jid) is False
+
+    # Cancelled can be retried
+    assert store.cancel(jid) is True
+    assert store.retry(jid) is True
+    assert store.get(jid).status == JobStatus.QUEUED
+
+    # Succeeded cannot be retried
+    claimed = store.claim_next(worker_id="w2")
+    assert claimed is not None
+    store.mark_succeeded(jid, out_md="a.md", out_json="a.json")
+    assert store.retry(jid) is False
+    assert store.get(jid).status == JobStatus.SUCCEEDED

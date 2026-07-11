@@ -164,6 +164,22 @@ class JobStore:
         self._conn.commit()
         return cur.rowcount == 1
 
+    def retry(self, job_id: str) -> bool:
+        """Re-queue a failed or cancelled job. Returns True if status changed."""
+        cur = self._conn.execute(
+            """UPDATE eval_jobs
+               SET status=?, error=NULL, worker_id=NULL, started_at=NULL, finished_at=NULL
+               WHERE id=? AND status IN (?, ?)""",
+            (
+                JobStatus.QUEUED.value,
+                job_id,
+                JobStatus.FAILED.value,
+                JobStatus.CANCELLED.value,
+            ),
+        )
+        self._conn.commit()
+        return cur.rowcount == 1
+
     def mark_succeeded(self, job_id: str, *, out_md: str, out_json: str) -> None:
         self._conn.execute(
             """UPDATE eval_jobs SET status=?, finished_at=?, out_md=?, out_json=?, error=NULL
