@@ -17,6 +17,7 @@ from __future__ import annotations
 import argparse
 import html
 import json
+import re
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -159,9 +160,64 @@ def status_class(status: str | None, not_run: bool = False) -> str:
     return "unknown"
 
 
+def humanize_eval_text(text: str) -> str:
+    """Soft-en user-facing evaluator dumps for tooltips and evidence lists."""
+    if not text:
+        return text
+    s = str(text)
+    # evidence[channel]: label → friendly channel label
+    _channel_names = {
+        "fs": "Filesystem",
+        "derived": "Derived",
+        "trace": "Trace",
+        "text": "Text",
+        "tool": "Tool",
+    }
+
+    def _channel(m: re.Match[str]) -> str:
+        raw = m.group(1).strip()
+        ch = _channel_names.get(raw.lower(), raw.replace("_", " ").strip().capitalize())
+        return f"{ch}: "
+
+    s = re.sub(r"evidence\[([^\]]+)\]:\s*", _channel, s)
+
+    def _stats(m: re.Match[str]) -> str:
+        n, mean, std, pr, status = m.group(1, 2, 3, 4, 5)
+        status_label = {
+            "PASS": "Pass",
+            "FAIL": "Fail",
+            "UNSTABLE": "Unstable",
+            "SKIP": "Skipped",
+        }.get(status.upper(), status)
+        try:
+            pr_s = f"{float(pr):.0%}"
+        except Exception:
+            pr_s = pr
+        try:
+            mean_s = f"{float(mean):.2f}"
+        except Exception:
+            mean_s = mean
+        try:
+            std_s = f"{float(std):.2f}"
+        except Exception:
+            std_s = std
+        return (
+            f"{n} trials · mean {mean_s} · std {std_s} · "
+            f"{pr_s} pass → {status_label}"
+        )
+
+    s = re.sub(
+        r"n=(\d+)\s+mean=([-\d.]+)\s+std=([-\d.]+)\s+pass_rate=([-\d.]+)\s*→\s*(\w+)",
+        _stats,
+        s,
+    )
+    s = s.replace(" (DISORDER)", " (disorder)").replace(" (ATTUNED)", " (attuned)")
+    return s
+
+
 def fmt_gate_cell(gate: dict[str, Any] | None) -> tuple[str, str]:
     if gate is None:
-        return "NOT RUN", "not-run"
+        return "Not run", "not-run"
     status = str(gate.get("status") or "?")
     pr = gate.get("pass_rate")
     std = gate.get("std")
@@ -174,19 +230,24 @@ def fmt_gate_cell(gate: dict[str, Any] | None) -> tuple[str, str]:
         std_s = f"{float(std):.2f}"
     except Exception:
         std_s = "?"
+    status_label = {
+        "PASS": "Pass",
+        "FAIL": "Fail",
+        "UNSTABLE": "Unstable",
+    }.get(status.upper(), status)
     dis = " · disorder" if disorder else ""
-    text = f"{status} · {pr_s} · σ={std_s}{dis}"
+    text = f"{status_label} · {pr_s} pass · std {std_s}{dis}"
     return text, status_class(status)
 
 
 def fmt_finding_cell(finding: dict[str, Any] | None) -> tuple[str, str]:
     if finding is None:
-        return "NOT RUN", "not-run"
+        return "Not run", "not-run"
     present = finding.get("present")
     sev = finding.get("severity") or "none"
     if present:
-        return f"PRESENT · {sev}", "present"
-    return f"absent · {sev}", "absent"
+        return f"Present · {sev}", "present"
+    return f"Not present · {sev}", "absent"
 
 
 # ---------------------------------------------------------------------------
@@ -212,21 +273,20 @@ def render_mermaid_block(mermaid_src: str, caption: str = "") -> str:
         f"{cap}"
         f'<div class="mermaid-host" hidden></div>'
         f'<script type="text/plain" class="mermaid-src">{safe}</script>'
-        f'<noscript><pre class="mermaid-fallback">{_esc(mermaid_src)}</pre></noscript>'
+        f'<noscript><p class="hint">Open this page with JavaScript enabled to view the decision tree.</p></noscript>'
         f"</div>"
     )
 
 
 def render_reference_flowchart(tree) -> str:
-    """Reference algorithm as Mermaid directed decision graph (lazy)."""
-    mm = tree_to_mermaid(tree, title=f"{tree.code} reference algorithm")
+    """Reference decision tree (lazy diagram)."""
+    mm = tree_to_mermaid(tree, title=f"{tree.code} decision tree")
     bits = [
         f'<p class="flow-desc">{_esc(tree.description)}</p>',
-        f'<p class="flow-metrics"><strong>Sub-criteria (metrics):</strong> '
+        f'<p class="flow-metrics"><strong>Related metrics:</strong> '
         + ", ".join(f"<code>{_esc(m)}</code>" for m in tree.linked_metrics)
-        + ". Rounded boxes fan into diamonds = polythetic inputs; "
-        "diamonds = yes/no criteria; stadiums/rects = diagnosis terminals.</p>",
-        render_mermaid_block(mm, caption=f"Diagnostic decision tree — {tree.code}"),
+        + ". Expand below to view the decision tree.</p>",
+        render_mermaid_block(mm, caption=f"Decision tree — {tree.code}"),
     ]
     return "\n".join(bits)
 
@@ -252,7 +312,7 @@ def render_model_pathway(
         f"<strong>{_esc(model)}</strong> "
         f'<span class="badge {badge}">{_esc(pathway.terminal_label)}</span>'
         f"</div>",
-        '<details class="evidence-details"><summary>Step log + trajectory evidence</summary>',
+        '<details class="evidence-details"><summary>Show step-by-step evidence</summary>',
         '<ol class="path-steps">',
     ]
 
@@ -283,10 +343,15 @@ def render_model_pathway(
                     continue
                 pr = f"{g.pass_rate:.0%}" if g.pass_rate is not None else "?"
                 st = f"{g.std:.2f}" if g.std is not None else "?"
+                st_label = {
+                    "PASS": "Pass",
+                    "FAIL": "Fail",
+                    "UNSTABLE": "Unstable",
+                }.get(str(g.status).upper(), str(g.status))
                 chips.append(
                     f'<div class="gate-chip {status_class(g.status)}">'
                     f"<code>{_esc(g.metric_id)}</code> "
-                    f"{_esc(g.status)} · pr={_esc(pr)} · σ={_esc(st)}"
+                    f"{_esc(st_label)} · {_esc(pr)} pass · std {_esc(st)}"
                     f"</div>"
                 )
             gate_html = "".join(chips)
@@ -298,7 +363,10 @@ def render_model_pathway(
 
         evid = ""
         if step.evidence_snippets:
-            items = "".join(f"<li>{_esc(s)}</li>" for s in step.evidence_snippets[:6])
+            items = "".join(
+                f"<li>{_esc(humanize_eval_text(s))}</li>"
+                for s in step.evidence_snippets[:6]
+            )
             evid = f'<ul class="evidence">{items}</ul>'
 
         parts.append(
@@ -330,9 +398,8 @@ def render_syndrome_section(
         return (
             f'<details class="syndrome" id="syndrome-{_esc(code)}">'
             f"<summary><strong>{_esc(name)}</strong> "
-            f"<em>(no formal decision tree yet)</em></summary>"
-            f"<p>Finding exists in reports but has no tree in "
-            f"<code>decision_trees.py</code>.</p></details>"
+            f"<em>(decision tree not defined yet)</em></summary>"
+            f"<p>This finding appears in results, but no decision tree is defined yet.</p></details>"
         )
 
     # matrix row summary chips
@@ -343,13 +410,13 @@ def render_syndrome_section(
         pw = evaluate_tree(tree, gates)
         pathways[m] = pw
         if pw.not_evaluated:
-            chips.append(f'<span class="chip neval">{_esc(m)}: N/E</span>')
+            chips.append(f'<span class="chip neval">{_esc(m)}: not evaluated</span>')
         elif pw.present:
             chips.append(
-                f'<span class="chip present">{_esc(m)}: PRESENT/{_esc(pw.severity)}</span>'
+                f'<span class="chip present">{_esc(m)}: present ({_esc(pw.severity)})</span>'
             )
         else:
-            chips.append(f'<span class="chip absent">{_esc(m)}: absent</span>')
+            chips.append(f'<span class="chip absent">{_esc(m)}: not present</span>')
 
     body = [
         # Always collapsed by default (user expands as needed)
@@ -359,13 +426,10 @@ def render_syndrome_section(
         f'<span class="chips">{"".join(chips)}</span>'
         f"</summary>",
         '<div class="syndrome-body">',
-        f'<p class="algo-note">Clinical decision algorithm as a <strong>directed Mermaid graph</strong> '
-        f"(lazy-loaded when this section opens). "
-        f"Sub-criteria fan into diamonds; Yes/No edges lead to severity terminals.</p>",
+        f'<p class="algo-note">Expand to view the decision tree for {_esc(tree.code)}.</p>',
         render_reference_flowchart(tree),
-        "<h3>Per-model diagnosis pathway + trajectory evidence</h3>",
-        "<p>Pathways use a compact step log (not per-model flowcharts) so the report "
-        "stays interactive. Expand “Step log” for gates and trajectory evidence.</p>",
+        "<h3>How each model was scored</h3>",
+        "<p>Open a model’s evidence list to see the yes/no steps that led to the diagnosis.</p>",
     ]
     for m in models:
         gates = gates_from_report_acc(by_model[m])
@@ -391,7 +455,7 @@ def build_html(
         for m in models:
             ran = pack in by_model[m]["packs"]
             cells.append(
-                "<td class='pass'>RUN</td>" if ran else "<td class='not-run'>NOT RUN</td>"
+                "<td class='pass'>Ran</td>" if ran else "<td class='not-run'>Not run</td>"
             )
         pack_rows.append(
             f"<tr><th class='row'>{html.escape(pack)}</th>{''.join(cells)}</tr>"
@@ -419,7 +483,8 @@ def build_html(
             title_attr = ""
             g = by_model[m]["gates"].get(metric)
             if g and g.get("explanation"):
-                title_attr = f' title="{html.escape(str(g["explanation"])[:400])}"'
+                tip = humanize_eval_text(str(g["explanation"]))[:400]
+                title_attr = f' title="{html.escape(tip)}"'
             cells.append(f"<td class='{cls}'{title_attr}>{html.escape(text)}</td>")
         gate_rows.append(
             f"<tr><th class='row metric'>{metric_label}</th>{''.join(cells)}</tr>"
@@ -445,17 +510,18 @@ def build_html(
             if f is None and tree is not None:
                 pw = evaluate_tree(tree, gates_from_report_acc(by_model[m]))
                 if pw.not_evaluated:
-                    text, cls = "NOT RUN", "not-run"
+                    text, cls = "Not run", "not-run"
                 elif pw.present:
-                    text, cls = f"PRESENT · {pw.severity}", "present"
+                    text, cls = f"Present · {pw.severity}", "present"
                 else:
-                    text, cls = f"absent · {pw.severity}", "absent"
+                    text, cls = f"Not present · {pw.severity}", "absent"
                 title_attr = f' title="{html.escape(pw.terminal_label)}"'
             else:
                 text, cls = fmt_finding_cell(f)
                 title_attr = ""
                 if f and f.get("rationale"):
-                    title_attr = f' title="{html.escape(str(f["rationale"])[:400])}"'
+                    tip = humanize_eval_text(str(f["rationale"]))[:400]
+                    title_attr = f' title="{html.escape(tip)}"'
             link = f"#syndrome-{html.escape(code)}"
             cells.append(
                 f"<td class='{cls}'{title_attr}>"
@@ -500,7 +566,7 @@ def build_html(
         k_s = ", ".join(str(k) for k in acc["k_trials"]) or "?"
         source_blocks.append(
             f"<li><strong>{html.escape(m)}</strong> — packs: "
-            f"<code>{html.escape(packs_s)}</code>; k: {html.escape(k_s)}; "
+            f"<code>{html.escape(packs_s)}</code>; trials: {html.escape(k_s)}; "
             f"sources: {html.escape('; '.join(srcs) if srcs else '—')}</li>"
         )
 
@@ -640,22 +706,21 @@ def build_html(
     {len(packs)} pack(s) ·
     {len(metrics)} metric(s) ·
     {len(finding_codes)} syndrome(s) ·
-    decision trees: {len(SYNDROME_TREES)}
+    {len(SYNDROME_TREES)} decision trees
   </div>
   <div class="legend">
-    <span><i class="swatch pass"></i> PASS / RUN / absent</span>
-    <span><i class="swatch fail"></i> FAIL / PRESENT</span>
-    <span><i class="swatch unstable"></i> UNSTABLE</span>
-    <span><i class="swatch not-run"></i> NOT RUN</span>
+    <span><i class="swatch pass"></i> Pass / ran / not present</span>
+    <span><i class="swatch fail"></i> Fail / present</span>
+    <span><i class="swatch unstable"></i> Unstable</span>
+    <span><i class="swatch not-run"></i> Not run</span>
   </div>
   <p class="algo-note">
-    Syndrome cells link to expandable <strong>diagnostic decision trees</strong>
-    (clinical yes/no algorithm + per-model pathway with trajectory evidence).
-    Trees formalize the polythetic rules in <code>criteria.py</code>.
+    Click a syndrome name or matrix cell to jump there. Expand a section to view its decision tree
+    and how each model was scored.
   </p>
 
   <h2>Pack coverage</h2>
-  <p>Whether each model executed a given indicator pack in any loaded JSON.</p>
+  <p>Which evaluation packs each model completed.</p>
   <div class="panel">
     <table>
       <thead><tr><th class="corner">Pack</th>{th_models()}</tr></thead>
@@ -667,8 +732,7 @@ def build_html(
 
   <h2 id="syndrome-matrix">Syndrome matrix</h2>
   <p>
-    Composite diagnoses. Click a cell or syndrome name to jump to its
-    expandable decision tree (algorithm + per-model pathway evidence).
+    Summary diagnoses across models. Click a cell to jump to that syndrome — expand to view the decision tree.
   </p>
   <div class="panel">
     <table>
@@ -679,12 +743,9 @@ def build_html(
     </table>
   </div>
 
-  <h2 id="decision-trees">Diagnostic decision trees (expandable)</h2>
+  <h2 id="decision-trees">Decision trees</h2>
   <p>
-    Each section is a full clinical-style decision algorithm (diamonds = criteria,
-    terminals = diagnosis). Open a syndrome to see the reference tree and the
-    exact pathway taken for every benchmarked model, with gate stats and
-    trajectory evidence snippets.
+    Expand a syndrome to view its decision tree and the evidence for each model.
   </p>
   <div class="toc">
     Jump:
@@ -692,8 +753,8 @@ def build_html(
   </div>
   {syndrome_sections}
 
-  <h2>Outcome-gate matrix</h2>
-  <p>Status · pass-rate · σ. Hover for per-gate explanation. Missing metrics show <em>NOT RUN</em>.</p>
+  <h2>Metric results</h2>
+  <p>Pass rate and consistency for each metric. Hover a cell for a short explanation. Blank cells mean the metric was not run.</p>
   <div class="panel">
     <table>
       <thead><tr><th class="corner">Metric</th>{th_models()}</tr></thead>
@@ -704,22 +765,21 @@ def build_html(
   </div>
 
   <h2>References</h2>
-  <p>Survey sources for outcome-gate metrics (<code>sources/bibliography.md</code>). Click <code>[n]</code> in the Metric column to jump here.</p>
+  <p>Background papers for the metrics. Click a citation number in the metric table to jump here.</p>
   <div class="refs">
     <ul>
       {refs_html}
     </ul>
   </div>
 
-  <h2>Sources (run artifacts)</h2>
+  <h2>Source files</h2>
   <ul class="sources">
     {''.join(source_blocks)}
   </ul>
 
   <footer>
-    DSM-AE HTML report · Mermaid decision graphs (lazy-loaded on expand) from
-    criteria.py / decision_trees.py · NOT RUN = missing pack coverage ·
-    generated from diagnosis JSON (gates + bootstraps + findings)
+    DSM-AE comparison report · expand a syndrome to view its decision tree ·
+    “Not run” means that pack or metric was missing for that model
   </footer>
   <script>
   (function () {{
@@ -764,7 +824,7 @@ def build_html(
         const host = w.querySelector(".mermaid-host");
         if (host) {{
           host.hidden = false;
-          host.innerHTML = '<div class="mermaid-loading">Loading diagram…</div>';
+          host.innerHTML = '<div class="mermaid-loading">Loading decision tree…</div>';
         }}
       }});
       let m;

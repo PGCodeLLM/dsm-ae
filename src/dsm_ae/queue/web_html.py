@@ -32,7 +32,7 @@ def render_queue_page(store: JobStore, href, auth_required: bool, title: str) ->
         token_row = """
         <label>Queue token <span class="hint">(UI auth — not the model API key)</span>
           <input type="password" name="token" id="token"
-                 placeholder="DSM_AE_QUEUE_TOKEN — not LiteLLM api_key"
+                 placeholder="queue token — not the model API key"
                  autocomplete="off"/>
         </label>
         <p class="hint" id="token-status"></p>
@@ -111,10 +111,10 @@ def render_queue_page(store: JobStore, href, auth_required: bool, title: str) ->
 </head>
 <body data-configured-base="{_esc(configured_base)}">
   <h1>DSM-AE evaluation queue</h1>
-  <p class="meta">Enqueue models · LiteLLM-style connection · pack multi-select · live progress files</p>
+  <p class="meta">Add a model, choose packs, and run evaluations. Progress updates live while jobs run.</p>
   <nav>
     <a href="{href("/")}" data-nav="/">Queue</a>
-    <a href="{href("/matrix")}" data-nav="/matrix" target="_blank" rel="noopener">Comparison matrix</a>
+    <a href="{href("/matrix")}" data-nav="/matrix" target="_blank" rel="noopener">Comparison report</a>
     <a href="{href("/reports/")}" data-nav="/reports/" target="_blank" rel="noopener">Reports</a>
     <a href="{href("/docs")}" data-nav="/docs" target="_blank" rel="noopener">API docs</a>
   </nav>
@@ -125,7 +125,7 @@ def render_queue_page(store: JobStore, href, auth_required: bool, title: str) ->
     <table>
       <thead>
         <tr>
-          <th>ID</th><th>Status</th><th>Model</th><th>Progress</th><th>k</th><th>Packs</th>
+          <th>ID</th><th>Status</th><th>Model</th><th>Progress</th><th>Trials</th><th>Packs</th>
           <th>Label</th><th>Created</th><th>Error</th><th></th>
         </tr>
       </thead>
@@ -133,18 +133,18 @@ def render_queue_page(store: JobStore, href, auth_required: bool, title: str) ->
         <tr><td colspan="10" style="color:#666">Loading…</td></tr>
       </tbody>
     </table>
-    <p class="hint">Jobs + progress refresh every 5s without reloading the form.</p>
+    <p class="hint">This list refreshes every few seconds. Your form fields stay as you left them.</p>
   </div>
 
   <div class="panel">
-    <h2>Enqueue</h2>
+    <h2>New evaluation</h2>
     <form class="enqueue" id="enqueue-form" method="post" action="{href("/queue")}">
       {token_row}
 
       <fieldset class="conn">
-        <legend>Model connection (LiteLLM-style)</legend>
+        <legend>Model endpoint</legend>
         <div class="grid2">
-          <label>Model id
+          <label>Model name
             <input type="text" name="model" id="f-model" required
                    placeholder="gpt-5.6-terra or mock/well_attuned"
                    autocomplete="off" data-persist="model"/>
@@ -156,7 +156,7 @@ def render_queue_page(store: JobStore, href, auth_required: bool, title: str) ->
           </label>
           <label>API key
             <input type="password" name="api_key" id="f-api-key"
-                   placeholder="sk-… (optional if models.yaml / mock)"
+                   placeholder="optional if already configured on the server"
                    autocomplete="off"/>
           </label>
           <label>Timeout (seconds)
@@ -164,44 +164,44 @@ def render_queue_page(store: JobStore, href, auth_required: bool, title: str) ->
                    data-persist="timeout"/>
           </label>
         </div>
-        <p class="hint">Leave API base/key empty for <code>mock/*</code> or models already in models.yaml. Keys go to a local secrets file (mode 0600), never returned by the API.</p>
+        <p class="hint">Leave base URL and key blank for offline demos (<code>mock/…</code>) or models already configured on the server. API keys stay on the server and are never shown in job lists.</p>
         <div class="row-inline">
           <button type="button" class="btn btn-test" id="test-conn-btn">Test connection</button>
           <span id="conn-result" role="status"></span>
         </div>
       </fieldset>
 
-      <label>Packs
+      <label>Evaluation packs
         <div class="pack-dd" id="pack-dd">
-          <button type="button" class="pack-toggle" id="pack-toggle">Select packs…</button>
+          <button type="button" class="pack-toggle" id="pack-toggle">Choose packs…</button>
           <div class="pack-panel" id="pack-panel">
             <div class="pack-actions">
-              <button type="button" id="pack-all">All</button>
-              <button type="button" id="pack-none">None</button>
+              <button type="button" id="pack-all">Select all</button>
+              <button type="button" id="pack-none">Clear</button>
             </div>
             {pack_checks}
           </div>
         </div>
       </label>
       <label class="hint" style="display:flex;align-items:center;gap:6px">
-        <input type="checkbox" id="f-full-cb" style="width:auto"/> Full suite (all registered packs)
+        <input type="checkbox" id="f-full-cb" style="width:auto"/> Run every pack
       </label>
 
       <div class="grid2">
-        <label>k (bootstrap trials)
+        <label>Trials per pack
           <input type="number" name="k" id="f-k" value="3" min="1" max="50" data-persist="k"/>
         </label>
-        <label>Concurrency (pack×trial)
+        <label>Parallel trials
           <input type="number" name="concurrency" id="f-concurrency" value="1" min="1" max="32" data-persist="concurrency"/>
         </label>
         <label>Priority
           <input type="number" name="priority" id="f-priority" value="0" data-persist="priority"/>
         </label>
         <label>Label (optional)
-          <input type="text" name="label" id="f-label" placeholder="demo-run" data-persist="label"/>
+          <input type="text" name="label" id="f-label" placeholder="e.g. weekly check" data-persist="label"/>
         </label>
       </div>
-      <button type="submit" id="enqueue-btn">Enqueue</button>
+      <button type="submit" id="enqueue-btn">Start evaluation</button>
     </form>
   </div>
 
@@ -327,9 +327,9 @@ def render_queue_page(store: JobStore, href, auth_required: bool, title: str) ->
     return Array.from(document.querySelectorAll(".pack-cb:checked")).map((c) => c.value);
   }}
   function updatePackLabel() {{
-    if (fullCb.checked) {{ toggle.textContent = "Full suite (all packs)"; return; }}
+    if (fullCb.checked) {{ toggle.textContent = "All packs"; return; }}
     const sel = selectedPacks();
-    if (!sel.length) toggle.textContent = "Select packs… (default: all)";
+    if (!sel.length) toggle.textContent = "Choose packs… (default: all)";
     else if (sel.length <= 3) toggle.textContent = sel.join(", ");
     else toggle.textContent = sel.length + " packs selected";
   }}
