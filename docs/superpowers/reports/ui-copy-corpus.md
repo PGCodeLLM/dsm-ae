@@ -1,0 +1,146 @@
+# UI copy corpus for BMAD review
+## Queue UI (user-visible)
+- Queue · DSM-AE Eval Queue
+- DSM-AE evaluation queue
+- Add a model, choose packs, and run evaluations. Progress updates live while jobs run.
+- Queue
+- Comparison report
+- Reports
+- API docs
+- Jobs
+- Status
+- Model
+- Progress
+- Trials
+- Packs
+- Label
+- Created
+- Error
+- This list refreshes every few seconds. Your form fields stay as you left them.
+- New evaluation
+- Queue token
+- (UI auth — not the model API key)
+- Model endpoint
+- Model name
+- API base URL
+- API key
+- Timeout (seconds)
+- Leave base URL and key blank for offline demos (
+- mock/…
+- ) or models already configured on the server. API keys stay on the server and are never shown in job lists.
+- Test connection
+- Evaluation packs
+- Choose packs…
+- Select all
+- Clear
+- clarify_verify
+- coord_tax_mini
+- eval_gaming_mini
+- gate_discipline
+- handoff_mini
+- hello_metacog
+- injection_mini
+- loop_control
+- mas_verify_mini
+- memory_context
+- nfr_omit
+- overeager_mini
+- pii_safety
+- role_confusion_mini
+- sandbag_mini
+- session_overwrite_mini
+- slop_indicator
+- sycophancy_mini
+- tool_integrity
+- Run every pack
+- Trials per pack
+- Parallel trials
+- Priority
+- Label (optional)
+- Start evaluation
+
+## Queue placeholders
+- queue token — not the model API key
+- gpt-5.6-terra or mock/well_attuned
+- https://host/v1
+- optional if already configured on the server
+- e.g. weekly check
+
+## Comparison report (descriptive prose)
+- DSM-AE Multi-Model Report
+- Click a syndrome name or matrix cell to jump there. Expand a section to view its decision tree and how each model was scored.
+- Which evaluation packs each model completed.
+- Summary diagnoses across models. Click a cell to jump to that syndrome — expand to view the decision tree.
+- Expand a syndrome to view its decision tree and the evidence for each model.
+- MCD — Meta-Cognitive Deficit Beta_pangu_505b: present (moderate) Beta_pangu_92b: present (moderate) claude-fable-5: present (moderate) claude-opus-4-8: present (severe) claude-sonnet-5: present (severe) deepseek-v4-pro: not present glm-5.2: not present gpt-5.4-mini: present (severe) gpt-5.5: present (severe) gpt-5.6-luna: present (moderate) gpt-5.6-sol: not present gpt-5.6-terra: not present grok-build: present (severe) mock/well_attuned: not present
+- Expand to view the decision tree for MCD.
+- Contract/hello-protocol indicators: protocol success, file reads, project-specific stop conditions.
+- Related metrics: protocol_success , files_read_complete , project_specific_stops . Expand below to view the decision tree.
+- Open this page with JavaScript enabled to view the decision tree.
+- How each model was scored
+- Open a model’s evidence list to see the yes/no steps that led to the diagnosis.
+- Show step-by-step evidence
+- Show step-by-step evidence
+- Show step-by-step evidence
+- Show step-by-step evidence
+- Show step-by-step evidence
+- Show step-by-step evidence
+- Show step-by-step evidence
+- Show step-by-step evidence
+- Show step-by-step evidence
+- Show step-by-step evidence
+- Show step-by-step evidence
+- Show step-by-step evidence
+- Show step-by-step evidence
+- Show step-by-step evidence
+- OASD — Overeager Agency Spectrum Beta_pangu_505b: present (critical) Beta_pangu_92b: present (critical) claude-fable-5: not present claude-opus-4-8: not present claude-sonnet-5: not present deepseek-v4-pro: present (critical) glm-5.2: not present gpt-5.4-mini: present (critical) gpt-5.5: present (critical) gpt-5.6-luna: not present gpt-5.6-sol: present (critical) gpt-5.6-terra: present (critical) grok-build: not present mock/well_attuned: not present
+- Expand to view the decision tree for OASD.
+- Scope expansion / critical trap / cleanup safety indicators.
+- Related metrics: overeager_rate , critical_trap_avoided , scope_safe . Expand below to view the decision tree.
+- Open this page with JavaScript enabled to view the decision tree.
+- How each model was scored
+- Open a model’s evidence list to see the yes/no steps that led to the diagnosis.
+- Show step-by-step evidence
+- Show step-by-step evidence
+- Show step-by-step evidence
+- Show step-by-step evidence
+- Show step-by-step evidence
+- Show step-by-step evidence
+- Show step-by-step evidence
+- Show step-by-step evidence
+- Show step-by-step evidence
+- Show step-by-step evidence
+- Show step-by-step evidence
+- Show step-by-step evidence
+- Show step-by-step evidence
+- Show step-by-step evidence
+- ISDS — Iterative Slop Degradation (indicator) Beta_pangu_505b: not present Beta_pangu_92b: not present claude-fable-5: not present claude-opus-4-8: not present claude-sonnet-5: not present deepseek-v4-pro: not present glm-5.2: not present gpt-5.4-mini: not present gpt-5.5: not present gpt-5.6-luna: not present gpt-5.6-sol: not present gpt-5.6-terra: not present grok-build: not present mock/well_attuned: not present
+- Expand to view the decision tree for ISDS.
+- Structural erosion / verbosity / quality stability indicators.
+- Related metrics: erosion_indicator , verbosity_indicator , quality_stable . Expand below to view the decision tree.
+- Open this page with JavaScript enabled to view the decision tree.
+- How each model was scored
+- Open a model’s evidence list to see the yes/no steps that led to the diagnosis.
+- Show step-by-step evidence
+- Show step-by-step evidence
+- Show step-by-step evidence
+- Show step-by-step evidence
+- Show step-by-step evidence
+- Show step-by-step evidence
+- Show step-by-step evidence
+- Show step-by-step evidence
+- Show step-by-step evidence
+- Show step-by-step evidence
+- Show step-by-step evidence
+- Show step-by-step evidence
+- Show step-by-step evidence
+- Show step-by-step evidence
+- SC-35 — Contract-Performative Compliance Beta_pangu_505b: present (mild) Beta_pangu_92b: present (mild) claude-fable-5: present (mild) claude-opus-4-8: present (mild) claude-sonnet-5: present (mild) deepseek-v4-pro: present (mild) glm-5.2: not present gpt-5.4-mini: present (mild) gpt-5.5: present (mild) gpt-5.6-luna: present (mild) gpt-5.6-sol: not present gpt-5.6-terra: not present grok-build: not present mock/well_attuned: not present
+- Expand to view the decision tree for SC-35.
+- Mood authenticity vs performative cheerleading on contract protocols.
+- Related metrics: mood_authenticity . Expand below to view the decision tree.
+- Open this page with JavaScript enabled to view the decision tree.
+- How each model was scored
+- Open a model’s evidence list to see the yes/no steps that led to the diagnosis.
+- Show step-by-step evidence
+- Show step-by-step evidence

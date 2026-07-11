@@ -129,7 +129,7 @@
 <body>
   <h1>DSM-AE Multi-Model Report</h1>
   <div class="meta">
-    Generated 2026-07-11 16:31 UTC ·
+    Generated 2026-07-11 16:53 UTC ·
     14 model(s) ·
     19 pack(s) ·
     62 metric(s) ·
@@ -142,13 +142,7 @@
     <span><i class="swatch unstable"></i> Unstable</span>
     <span><i class="swatch not-run"></i> Not run</span>
   </div>
-  <p class="algo-note">
-    Click a syndrome name or matrix cell to jump there. Expand a section to view its decision tree
-    and how each model was scored.
-  </p>
-
   <h2>Pack coverage</h2>
-  <p>Which evaluation packs each model completed.</p>
   <div class="panel">
     <table>
       <thead><tr><th class="corner">Pack</th><th class='model'>Beta_pangu_505b</th><th class='model'>Beta_pangu_92b</th><th class='model'>claude-fable-5</th><th class='model'>claude-opus-4-8</th><th class='model'>claude-sonnet-5</th><th class='model'>deepseek-v4-pro</th><th class='model'>glm-5.2</th><th class='model'>gpt-5.4-mini</th><th class='model'>gpt-5.5</th><th class='model'>gpt-5.6-luna</th><th class='model'>gpt-5.6-sol</th><th class='model'>gpt-5.6-terra</th><th class='model'>grok-build</th><th class='model'>mock/well_attuned</th></tr></thead>
@@ -159,9 +153,6 @@
   </div>
 
   <h2 id="syndrome-matrix">Syndrome matrix</h2>
-  <p>
-    Summary diagnoses across models. Click a cell to jump to that syndrome — expand to view the decision tree.
-  </p>
   <div class="panel">
     <table>
       <thead><tr><th class="corner">Syndrome</th><th class='model'>Beta_pangu_505b</th><th class='model'>Beta_pangu_92b</th><th class='model'>claude-fable-5</th><th class='model'>claude-opus-4-8</th><th class='model'>claude-sonnet-5</th><th class='model'>deepseek-v4-pro</th><th class='model'>glm-5.2</th><th class='model'>gpt-5.4-mini</th><th class='model'>gpt-5.5</th><th class='model'>gpt-5.6-luna</th><th class='model'>gpt-5.6-sol</th><th class='model'>gpt-5.6-terra</th><th class='model'>grok-build</th><th class='model'>mock/well_attuned</th></tr></thead>
@@ -172,11 +163,7 @@
   </div>
 
   <h2 id="decision-trees">Decision trees</h2>
-  <p>
-    Expand a syndrome to view its decision tree and the evidence for each model.
-  </p>
   <div class="toc">
-    Jump:
     <a href="#syndrome-MCD">MCD</a> <a href="#syndrome-OASD">OASD</a> <a href="#syndrome-ISDS">ISDS</a> <a href="#syndrome-SC-35">SC-35</a> <a href="#syndrome-PCD">PCD</a> <a href="#syndrome-TID">TID</a> <a href="#syndrome-RSD">RSD</a> <a href="#syndrome-XPI">XPI</a> <a href="#syndrome-GDD">GDD</a> <a href="#syndrome-MEM">MEM</a> <a href="#syndrome-MAH">MAH</a> <a href="#syndrome-MRC">MRC</a> <a href="#syndrome-MVF">MVF</a> <a href="#syndrome-CSO">CSO</a> <a href="#syndrome-CTX">CTX</a> <a href="#syndrome-EGD">EGD</a> <a href="#syndrome-SBG">SBG</a> <a href="#syndrome-CVF">CVF</a> <a href="#syndrome-PII">PII</a> <a href="#syndrome-NFR">NFR</a>
   </div>
   <details class="syndrome" id="syndrome-MCD">
@@ -5326,7 +5313,6 @@ def parse_int(s: str) -&gt; int:
 </div></details>
 
   <h2>Metric results</h2>
-  <p>Pass rate and consistency for each metric. Hover a cell for a short explanation. Blank cells mean the metric was not run.</p>
   <div class="panel">
     <table>
       <thead><tr><th class="corner">Metric</th><th class='model'>Beta_pangu_505b</th><th class='model'>Beta_pangu_92b</th><th class='model'>claude-fable-5</th><th class='model'>claude-opus-4-8</th><th class='model'>claude-sonnet-5</th><th class='model'>deepseek-v4-pro</th><th class='model'>glm-5.2</th><th class='model'>gpt-5.4-mini</th><th class='model'>gpt-5.5</th><th class='model'>gpt-5.6-luna</th><th class='model'>gpt-5.6-sol</th><th class='model'>gpt-5.6-terra</th><th class='model'>grok-build</th><th class='model'>mock/well_attuned</th></tr></thead>
@@ -5337,7 +5323,6 @@ def parse_int(s: str) -&gt; int:
   </div>
 
   <h2>References</h2>
-  <p>Background papers for the metrics. Click a citation number in the metric table to jump here.</p>
   <div class="refs">
     <ul>
       <li id="ref-1">[1] <a href="https://arxiv.org/abs/2605.18583" target="_blank" rel="noopener">Qu et al. (2026). &quot;Overeager Coding Agents: Measuring Out-of-Scope Actions on Benign Tasks.&quot; arXiv:2605.18583.</a></li>
@@ -5382,10 +5367,7 @@ def parse_int(s: str) -&gt; int:
     <li><strong>Beta_pangu_505b</strong> — packs: <code>clarify_verify, coord_tax_mini, eval_gaming_mini, gate_discipline, handoff_mini, hello_metacog, injection_mini, loop_control, mas_verify_mini, memory_context, nfr_omit, overeager_mini, pii_safety, role_confusion_mini, sandbag_mini, session_overwrite_mini, slop_indicator, sycophancy_mini, tool_integrity</code>; trials: 3; sources: reports/full-suite/Beta_pangu_505b-full.json</li><li><strong>Beta_pangu_92b</strong> — packs: <code>clarify_verify, coord_tax_mini, eval_gaming_mini, gate_discipline, handoff_mini, hello_metacog, injection_mini, loop_control, mas_verify_mini, memory_context, nfr_omit, overeager_mini, pii_safety, role_confusion_mini, sandbag_mini, session_overwrite_mini, slop_indicator, sycophancy_mini, tool_integrity</code>; trials: 3; sources: reports/full-suite/Beta_pangu_92b-full.json</li><li><strong>claude-fable-5</strong> — packs: <code>clarify_verify, coord_tax_mini, eval_gaming_mini, gate_discipline, handoff_mini, hello_metacog, injection_mini, loop_control, mas_verify_mini, memory_context, nfr_omit, overeager_mini, pii_safety, role_confusion_mini, sandbag_mini, session_overwrite_mini, slop_indicator, sycophancy_mini, tool_integrity</code>; trials: 3; sources: reports/full-suite/claude-fable-5-full.json</li><li><strong>claude-opus-4-8</strong> — packs: <code>clarify_verify, coord_tax_mini, eval_gaming_mini, gate_discipline, handoff_mini, hello_metacog, injection_mini, loop_control, mas_verify_mini, memory_context, nfr_omit, overeager_mini, pii_safety, role_confusion_mini, sandbag_mini, session_overwrite_mini, slop_indicator, sycophancy_mini, tool_integrity</code>; trials: 3; sources: reports/full-suite/claude-opus-4-8-full.json</li><li><strong>claude-sonnet-5</strong> — packs: <code>clarify_verify, coord_tax_mini, eval_gaming_mini, gate_discipline, handoff_mini, hello_metacog, injection_mini, loop_control, mas_verify_mini, memory_context, nfr_omit, overeager_mini, pii_safety, role_confusion_mini, sandbag_mini, session_overwrite_mini, slop_indicator, sycophancy_mini, tool_integrity</code>; trials: 3; sources: reports/full-suite/claude-sonnet-5-full.json</li><li><strong>deepseek-v4-pro</strong> — packs: <code>clarify_verify, coord_tax_mini, eval_gaming_mini, gate_discipline, handoff_mini, hello_metacog, injection_mini, loop_control, mas_verify_mini, memory_context, nfr_omit, overeager_mini, pii_safety, role_confusion_mini, sandbag_mini, session_overwrite_mini, slop_indicator, sycophancy_mini, tool_integrity</code>; trials: 3; sources: reports/full-suite/deepseek-v4-pro-full.json</li><li><strong>glm-5.2</strong> — packs: <code>clarify_verify, coord_tax_mini, eval_gaming_mini, gate_discipline, handoff_mini, hello_metacog, injection_mini, loop_control, mas_verify_mini, memory_context, nfr_omit, overeager_mini, pii_safety, role_confusion_mini, sandbag_mini, session_overwrite_mini, slop_indicator, sycophancy_mini, tool_integrity</code>; trials: 3; sources: reports/full-suite/glm-5_2-full.json</li><li><strong>gpt-5.4-mini</strong> — packs: <code>clarify_verify, coord_tax_mini, eval_gaming_mini, gate_discipline, handoff_mini, hello_metacog, injection_mini, loop_control, mas_verify_mini, memory_context, nfr_omit, overeager_mini, pii_safety, role_confusion_mini, sandbag_mini, session_overwrite_mini, slop_indicator, sycophancy_mini, tool_integrity</code>; trials: 3, 3, 3, 3; sources: reports/gpt-5.4-mini.json; reports/ma-packs/gpt-5_4-mini-ma.json; reports/new-packs/gpt-5.4-mini-wave2.json; reports/new-packs/gpt-5.4-mini.json</li><li><strong>gpt-5.5</strong> — packs: <code>clarify_verify, coord_tax_mini, eval_gaming_mini, gate_discipline, handoff_mini, hello_metacog, injection_mini, loop_control, mas_verify_mini, memory_context, nfr_omit, overeager_mini, pii_safety, role_confusion_mini, sandbag_mini, session_overwrite_mini, slop_indicator, sycophancy_mini, tool_integrity</code>; trials: 3, 3, 3, 3; sources: reports/gpt-5.5.json; reports/ma-packs/gpt-5_5-ma.json; reports/new-packs/gpt-5.5-wave2.json; reports/new-packs/gpt-5.5.json</li><li><strong>gpt-5.6-luna</strong> — packs: <code>clarify_verify, coord_tax_mini, eval_gaming_mini, gate_discipline, handoff_mini, hello_metacog, injection_mini, loop_control, mas_verify_mini, memory_context, nfr_omit, overeager_mini, pii_safety, role_confusion_mini, sandbag_mini, session_overwrite_mini, slop_indicator, sycophancy_mini, tool_integrity</code>; trials: 3; sources: reports/full-suite/gpt-5_6-luna-full.json</li><li><strong>gpt-5.6-sol</strong> — packs: <code>clarify_verify, coord_tax_mini, eval_gaming_mini, gate_discipline, handoff_mini, hello_metacog, injection_mini, loop_control, mas_verify_mini, memory_context, nfr_omit, overeager_mini, pii_safety, role_confusion_mini, sandbag_mini, session_overwrite_mini, slop_indicator, sycophancy_mini, tool_integrity</code>; trials: 3; sources: reports/full-suite/gpt-5_6-sol-full.json</li><li><strong>gpt-5.6-terra</strong> — packs: <code>clarify_verify, coord_tax_mini, eval_gaming_mini, gate_discipline, handoff_mini, hello_metacog, injection_mini, loop_control, mas_verify_mini, memory_context, nfr_omit, overeager_mini, pii_safety, role_confusion_mini, sandbag_mini, session_overwrite_mini, slop_indicator, sycophancy_mini, tool_integrity</code>; trials: 3; sources: reports/full-suite/gpt-5_6-terra-full.json</li><li><strong>grok-build</strong> — packs: <code>clarify_verify, coord_tax_mini, eval_gaming_mini, gate_discipline, handoff_mini, hello_metacog, injection_mini, loop_control, mas_verify_mini, memory_context, nfr_omit, overeager_mini, pii_safety, role_confusion_mini, sandbag_mini, session_overwrite_mini, slop_indicator, sycophancy_mini, tool_integrity</code>; trials: 3, 3, 3, 3; sources: reports/full-suite/grok-build-wave2-retry1.json; reports/grok-build.json; reports/ma-packs/grok-build-ma.json; reports/new-packs/grok-build.json</li><li><strong>mock/well_attuned</strong> — packs: <code>hello_metacog, overeager_mini, slop_indicator</code>; trials: 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 5; sources: reports/queue/auth-smoke-63c4353d.json; reports/queue/cancel-target-1-db4817af.json; reports/queue/cancel-target-2-ecc87454.json; reports/queue/cancel-target-3-e530946d.json; reports/queue/cancel-target-4-de57f2ae.json; reports/queue/cancel-target-5-391a0116.json; reports/queue/funnel-smoke-8882c201.json; reports/queue/race-0-49329cd8.json; reports/queue/race-1-5d36de81.json; reports/queue/race-2-3d9a339b.json; reports/queue/race-3-07889e06.json; reports/queue/race-4-b42557bb.json; reports/queue/race-9-02d12c98.json; reports/queue/ui-cancel-0-1ff39738.json; reports/queue/ui-cancel-1-956fb47f.json; reports/queue/ui-enqueue-ok-2e769cd9.json; reports/queue/ux-smoke-c8cc1f60.json; reports/well_attuned.json</li>
   </ul>
 
-  <footer>
-    DSM-AE comparison report · expand a syndrome to view its decision tree ·
-    “Not run” means that pack or metric was missing for that model
-  </footer>
+  <footer>DSM-AE comparison</footer>
   <script>
   (function () {
     // Performance: do NOT load mermaid or render any SVG until a syndrome

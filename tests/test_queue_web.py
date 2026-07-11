@@ -35,7 +35,7 @@ def test_health_and_home(client: TestClient):
     assert r.json()["public_base"] == "/dsm-ae"
     r = client.get("/")
     assert r.status_code == 200
-    assert b"evaluation queue" in r.content.lower()
+    assert b"eval queue" in r.content.lower()
     # Nav uses data-nav + client-side base detection (works local + funnel).
     assert b'data-nav="/matrix"' in r.content
     assert b"detectBase" in r.content or b"data-configured-base" in r.content
@@ -43,6 +43,7 @@ def test_health_and_home(client: TestClient):
     assert b"pack-cb" in r.content  # multi-select packs
     assert b"Test connection" in r.content
     assert b"api_base" in r.content or b"f-api-base" in r.content
+    assert b"Auto-refresh 5s" in r.content
 
 
 def test_enqueue_list_api(client: TestClient):
@@ -145,7 +146,7 @@ def test_public_base_prefix_routes_work(client: TestClient):
     """Middleware strips public_base so /dsm-ae/* works without a funnel."""
     r = client.get("/dsm-ae/")
     assert r.status_code == 200
-    assert b"evaluation queue" in r.content.lower()
+    assert b"eval queue" in r.content.lower()
     r = client.get("/dsm-ae/api/jobs")
     assert r.status_code == 200
     assert isinstance(r.json(), list)

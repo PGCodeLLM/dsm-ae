@@ -30,19 +30,19 @@ def render_queue_page(store: JobStore, href, auth_required: bool, title: str) ->
     token_row = ""
     if auth_required:
         token_row = """
-        <label>Queue token <span class="hint">(UI auth — not the model API key)</span>
+        <label>Queue token
           <input type="password" name="token" id="token"
-                 placeholder="queue token — not the model API key"
+                 placeholder="UI token, not model key"
                  autocomplete="off"/>
         </label>
-        <p class="hint" id="token-status"></p>
+        <p class="hint" id="token-status" hidden></p>
         """
     return f"""<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1"/>
-<title>{_esc(title)} · DSM-AE Eval Queue</title>
+<title>{_esc(title)} · Eval queue</title>
 <style>
   :root {{ font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; }}
   body {{ margin: 0; padding: 16px 18px; background: #fafafa; color: #111; }}
@@ -110,18 +110,18 @@ def render_queue_page(store: JobStore, href, auth_required: bool, title: str) ->
 </style>
 </head>
 <body data-configured-base="{_esc(configured_base)}">
-  <h1>DSM-AE evaluation queue</h1>
-  <p class="meta">Add a model, choose packs, and run evaluations. Progress updates live while jobs run.</p>
+  <h1>Eval queue</h1>
+  <p class="meta">Add a model, choose packs, and run evaluations.</p>
   <nav>
     <a href="{href("/")}" data-nav="/">Queue</a>
-    <a href="{href("/matrix")}" data-nav="/matrix" target="_blank" rel="noopener">Comparison report</a>
+    <a href="{href("/matrix")}" data-nav="/matrix" target="_blank" rel="noopener">Comparison</a>
     <a href="{href("/reports/")}" data-nav="/reports/" target="_blank" rel="noopener">Reports</a>
-    <a href="{href("/docs")}" data-nav="/docs" target="_blank" rel="noopener">API docs</a>
+    <a href="{href("/docs")}" data-nav="/docs" target="_blank" rel="noopener">API</a>
   </nav>
   <div id="flash" role="status" aria-live="polite"></div>
 
   <div class="panel">
-    <h2>Jobs <span id="jobs-updated" class="hint"></span></h2>
+    <h2>Jobs <span id="jobs-updated" class="hint">· Auto-refresh 5s</span></h2>
     <table>
       <thead>
         <tr>
@@ -130,10 +130,9 @@ def render_queue_page(store: JobStore, href, auth_required: bool, title: str) ->
         </tr>
       </thead>
       <tbody id="jobs-body">
-        <tr><td colspan="10" style="color:#666">Loading…</td></tr>
+        <tr><td colspan="10" style="color:#666">No jobs</td></tr>
       </tbody>
     </table>
-    <p class="hint">This list refreshes every few seconds. Your form fields stay as you left them.</p>
   </div>
 
   <div class="panel">
@@ -164,14 +163,14 @@ def render_queue_page(store: JobStore, href, auth_required: bool, title: str) ->
                    data-persist="timeout"/>
           </label>
         </div>
-        <p class="hint">Leave base URL and key blank for offline demos (<code>mock/…</code>) or models already configured on the server. API keys stay on the server and are never shown in job lists.</p>
+        <p class="hint">Blank = server config or mock/…</p>
         <div class="row-inline">
           <button type="button" class="btn btn-test" id="test-conn-btn">Test connection</button>
           <span id="conn-result" role="status"></span>
         </div>
       </fieldset>
 
-      <label>Evaluation packs
+      <label>Packs
         <div class="pack-dd" id="pack-dd">
           <button type="button" class="pack-toggle" id="pack-toggle">Choose packs…</button>
           <div class="pack-panel" id="pack-panel">
@@ -184,20 +183,20 @@ def render_queue_page(store: JobStore, href, auth_required: bool, title: str) ->
         </div>
       </label>
       <label class="hint" style="display:flex;align-items:center;gap:6px">
-        <input type="checkbox" id="f-full-cb" style="width:auto"/> Run every pack
+        <input type="checkbox" id="f-full-cb" style="width:auto"/> All packs
       </label>
 
       <div class="grid2">
-        <label>Trials per pack
+        <label>Trials
           <input type="number" name="k" id="f-k" value="3" min="1" max="50" data-persist="k"/>
         </label>
-        <label>Parallel trials
+        <label>Concurrency
           <input type="number" name="concurrency" id="f-concurrency" value="1" min="1" max="32" data-persist="concurrency"/>
         </label>
         <label>Priority
           <input type="number" name="priority" id="f-priority" value="0" data-persist="priority"/>
         </label>
-        <label>Label (optional)
+        <label>Label
           <input type="text" name="label" id="f-label" placeholder="e.g. weekly check" data-persist="label"/>
         </label>
       </div>
@@ -284,7 +283,7 @@ def render_queue_page(store: JobStore, href, auth_required: bool, title: str) ->
       setQueueTokenCookie(t);
       const el = document.getElementById("token");
       if (el && !el.value) el.value = t;
-      tokenStatus("Queue token saved in cookie for this browser (" + TOKEN_COOKIE_DAYS + " days).", true);
+      // Silent cookie persist — no implementation toast.
     }}
   }}
   function authHeaders() {{
@@ -329,7 +328,7 @@ def render_queue_page(store: JobStore, href, auth_required: bool, title: str) ->
   function updatePackLabel() {{
     if (fullCb.checked) {{ toggle.textContent = "All packs"; return; }}
     const sel = selectedPacks();
-    if (!sel.length) toggle.textContent = "Choose packs… (default: all)";
+    if (!sel.length) toggle.textContent = "Choose packs…";
     else if (sel.length <= 3) toggle.textContent = sel.join(", ");
     else toggle.textContent = sel.length + " packs selected";
   }}
@@ -387,7 +386,6 @@ def render_queue_page(store: JobStore, href, auth_required: bool, title: str) ->
       const cookieTok = getCookie(TOKEN_COOKIE);
       if (cookieTok) {{
         tokEl.value = cookieTok;
-        tokenStatus("Queue token loaded from cookie.", true);
       }}
     }}
     updatePackLabel();
@@ -415,7 +413,7 @@ def render_queue_page(store: JobStore, href, auth_required: bool, title: str) ->
   function renderJobs(jobs) {{
     const tbody = document.getElementById("jobs-body");
     if (!jobs || !jobs.length) {{
-      tbody.innerHTML = '<tr><td colspan="10" style="color:#666">No jobs yet — enqueue below.</td></tr>';
+      tbody.innerHTML = '<tr><td colspan="10" style="color:#666">No jobs</td></tr>';
       return;
     }}
     tbody.innerHTML = jobs.map((j) => {{
@@ -448,18 +446,18 @@ def render_queue_page(store: JobStore, href, auth_required: bool, title: str) ->
       if (!res.ok) throw new Error("HTTP " + res.status);
       renderJobs(await res.json());
       const u = document.getElementById("jobs-updated");
-      u.textContent = "· updated " + new Date().toLocaleTimeString();
+      u.textContent = "· Auto-refresh 5s · " + new Date().toLocaleTimeString();
       u.className = "hint ok";
     }} catch (e) {{
       const u = document.getElementById("jobs-updated");
-      u.textContent = "· refresh failed";
+      u.textContent = "· Auto-refresh failed";
       u.className = "hint err";
     }}
   }}
 
   async function jobAction(act, id, btn) {{
     if (AUTH_REQUIRED && !getQueueToken()) {{
-      flash("Queue UI token required for " + act + " (not the model API key).", false);
+      flash("Queue token required", false);
       return;
     }}
     if (btn) btn.disabled = true;
@@ -488,17 +486,13 @@ def render_queue_page(store: JobStore, href, auth_required: bool, title: str) ->
 
   document.getElementById("test-conn-btn").addEventListener("click", async () => {{
     if (AUTH_REQUIRED && !getQueueToken()) {{
-      connMsg(
-        "Queue UI token required before testing the inference endpoint "
-        + "(enter DSM_AE_QUEUE_TOKEN — this is not the model API key).",
-        false
-      );
+      connMsg("Queue token required", false);
       return;
     }}
     const btn = document.getElementById("test-conn-btn");
     btn.disabled = true;
     const t0 = performance.now();
-    connMsg("Testing inference endpoint (max ~45s)…", true);
+    connMsg("Testing…", true);
     try {{
       // Cap probe timeout so a dead host does not hang the UI for 120s.
       const formTimeout = parseFloat(document.getElementById("f-timeout").value || "45");
@@ -545,11 +539,7 @@ def render_queue_page(store: JobStore, href, auth_required: bool, title: str) ->
       const ms = Math.round(performance.now() - t0);
       const name = (e && e.name) || "";
       if (name === "AbortError") {{
-        connMsg(
-          "Inference endpoint test aborted after timeout — host may be down, "
-          + "unreachable, or stuck behind a proxy. Queue token is separate. (" + ms + "ms)",
-          false
-        );
+        connMsg("Test timed out (" + ms + "ms)", false);
       }} else {{
         connMsg(String(e) + " (" + ms + "ms)", false);
       }}
@@ -562,10 +552,7 @@ def render_queue_page(store: JobStore, href, auth_required: bool, title: str) ->
   form.addEventListener("submit", async (ev) => {{
     ev.preventDefault(); persistForm();
     if (AUTH_REQUIRED && !getQueueToken()) {{
-      flash(
-        "Queue UI token required to enqueue (DSM_AE_QUEUE_TOKEN — not the model API key).",
-        false
-      );
+      flash("Queue token required", false);
       return;
     }}
     const btn = document.getElementById("enqueue-btn");

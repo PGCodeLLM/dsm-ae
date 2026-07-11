@@ -283,9 +283,9 @@ def render_reference_flowchart(tree) -> str:
     mm = tree_to_mermaid(tree, title=f"{tree.code} decision tree")
     bits = [
         f'<p class="flow-desc">{_esc(tree.description)}</p>',
-        f'<p class="flow-metrics"><strong>Related metrics:</strong> '
+        f'<p class="flow-metrics"><strong>Metrics:</strong> '
         + ", ".join(f"<code>{_esc(m)}</code>" for m in tree.linked_metrics)
-        + ". Expand below to view the decision tree.</p>",
+        + "</p>",
         render_mermaid_block(mm, caption=f"Decision tree — {tree.code}"),
     ]
     return "\n".join(bits)
@@ -312,7 +312,7 @@ def render_model_pathway(
         f"<strong>{_esc(model)}</strong> "
         f'<span class="badge {badge}">{_esc(pathway.terminal_label)}</span>'
         f"</div>",
-        '<details class="evidence-details"><summary>Show step-by-step evidence</summary>',
+        '<details class="evidence-details"><summary>Evidence</summary>',
         '<ol class="path-steps">',
     ]
 
@@ -426,10 +426,8 @@ def render_syndrome_section(
         f'<span class="chips">{"".join(chips)}</span>'
         f"</summary>",
         '<div class="syndrome-body">',
-        f'<p class="algo-note">Expand to view the decision tree for {_esc(tree.code)}.</p>',
         render_reference_flowchart(tree),
-        "<h3>How each model was scored</h3>",
-        "<p>Open a model’s evidence list to see the yes/no steps that led to the diagnosis.</p>",
+        "<h3>Models</h3>",
     ]
     for m in models:
         gates = gates_from_report_acc(by_model[m])
@@ -714,13 +712,7 @@ def build_html(
     <span><i class="swatch unstable"></i> Unstable</span>
     <span><i class="swatch not-run"></i> Not run</span>
   </div>
-  <p class="algo-note">
-    Click a syndrome name or matrix cell to jump there. Expand a section to view its decision tree
-    and how each model was scored.
-  </p>
-
   <h2>Pack coverage</h2>
-  <p>Which evaluation packs each model completed.</p>
   <div class="panel">
     <table>
       <thead><tr><th class="corner">Pack</th>{th_models()}</tr></thead>
@@ -731,9 +723,6 @@ def build_html(
   </div>
 
   <h2 id="syndrome-matrix">Syndrome matrix</h2>
-  <p>
-    Summary diagnoses across models. Click a cell to jump to that syndrome — expand to view the decision tree.
-  </p>
   <div class="panel">
     <table>
       <thead><tr><th class="corner">Syndrome</th>{th_models()}</tr></thead>
@@ -744,17 +733,12 @@ def build_html(
   </div>
 
   <h2 id="decision-trees">Decision trees</h2>
-  <p>
-    Expand a syndrome to view its decision tree and the evidence for each model.
-  </p>
   <div class="toc">
-    Jump:
     {" ".join(f'<a href="#syndrome-{html.escape(c)}">{html.escape(c)}</a>' for c in tree_order)}
   </div>
   {syndrome_sections}
 
   <h2>Metric results</h2>
-  <p>Pass rate and consistency for each metric. Hover a cell for a short explanation. Blank cells mean the metric was not run.</p>
   <div class="panel">
     <table>
       <thead><tr><th class="corner">Metric</th>{th_models()}</tr></thead>
@@ -765,7 +749,6 @@ def build_html(
   </div>
 
   <h2>References</h2>
-  <p>Background papers for the metrics. Click a citation number in the metric table to jump here.</p>
   <div class="refs">
     <ul>
       {refs_html}
@@ -777,10 +760,7 @@ def build_html(
     {''.join(source_blocks)}
   </ul>
 
-  <footer>
-    DSM-AE comparison report · expand a syndrome to view its decision tree ·
-    “Not run” means that pack or metric was missing for that model
-  </footer>
+  <footer>DSM-AE comparison</footer>
   <script>
   (function () {{
     // Performance: do NOT load mermaid or render any SVG until a syndrome
