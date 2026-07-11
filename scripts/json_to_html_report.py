@@ -199,18 +199,26 @@ def _esc(s: Any) -> str:
 
 
 def render_mermaid_block(mermaid_src: str, caption: str = "") -> str:
-    """Wrap Mermaid source in a renderable div (requires mermaid.js in page)."""
+    """Deferred Mermaid block — not rendered until the parent <details> opens.
+
+    Source is stored in a non-executable script tag so mermaid.startOnLoad
+    never walks hundreds of graphs on first paint.
+    """
     cap = f'<div class="flow-title">{_esc(caption)}</div>' if caption else ""
-    # Do not HTML-escape Mermaid syntax characters; only guard </script>-like closes
-    safe = mermaid_src.replace("</", "<\\/")
+    # Guard against accidental </script> in graph text; keep Mermaid syntax intact.
+    safe = mermaid_src.replace("</script", "<\\/script")
     return (
-        f'<div class="mermaid-wrap">{cap}'
-        f'<pre class="mermaid">\n{safe}\n</pre></div>'
+        f'<div class="mermaid-wrap" data-lazy-mermaid="1">'
+        f"{cap}"
+        f'<div class="mermaid-host" hidden></div>'
+        f'<script type="text/plain" class="mermaid-src">{safe}</script>'
+        f'<noscript><pre class="mermaid-fallback">{_esc(mermaid_src)}</pre></noscript>'
+        f"</div>"
     )
 
 
 def render_reference_flowchart(tree) -> str:
-    """Reference algorithm as Mermaid directed decision graph."""
+    """Reference algorithm as Mermaid directed decision graph (lazy)."""
     mm = tree_to_mermaid(tree, title=f"{tree.code} reference algorithm")
     bits = [
         f'<p class="flow-desc">{_esc(tree.description)}</p>',
@@ -229,7 +237,7 @@ def render_model_pathway(
     model: str,
     gates: dict | None = None,
 ) -> str:
-    """Per-model Mermaid path (highlighted) + evidence list."""
+    """Per-model pathway as HTML step list only (no Mermaid — keeps matrix fast)."""
     badge = "neval"
     if pathway.not_evaluated:
         badge = "neval"
@@ -238,20 +246,12 @@ def render_model_pathway(
     else:
         badge = "absent"
 
-    mm = tree_to_mermaid(
-        tree,
-        pathway=pathway,
-        gates=gates,
-        title=f"{tree.code} pathway for {model}",
-    )
-
     parts = [
         f'<div class="model-path" data-model="{_esc(model)}">',
         f'<div class="path-head">'
         f"<strong>{_esc(model)}</strong> "
         f'<span class="badge {badge}">{_esc(pathway.terminal_label)}</span>'
         f"</div>",
-        render_mermaid_block(mm, caption=f"Taken path — {_esc(model)}"),
         '<details class="evidence-details"><summary>Step log + trajectory evidence</summary>',
         '<ol class="path-steps">',
     ]
@@ -360,12 +360,12 @@ def render_syndrome_section(
         f"</summary>",
         '<div class="syndrome-body">',
         f'<p class="algo-note">Clinical decision algorithm as a <strong>directed Mermaid graph</strong> '
-        f"(style of diagnostic trees in the BC Family Physician Guide). "
+        f"(lazy-loaded when this section opens). "
         f"Sub-criteria fan into diamonds; Yes/No edges lead to severity terminals.</p>",
         render_reference_flowchart(tree),
         "<h3>Per-model diagnosis pathway + trajectory evidence</h3>",
-        "<p>Same graph evaluated on each model's gates. Metric nodes are colored by "
-        "PASS/FAIL/UNSTABLE; the taken path is outlined. Expand “Step log” for evidence.</p>",
+        "<p>Pathways use a compact step log (not per-model flowcharts) so the report "
+        "stays interactive. Expand “Step log” for gates and trajectory evidence.</p>",
     ]
     for m in models:
         gates = gates_from_report_acc(by_model[m])
@@ -584,12 +584,15 @@ def build_html(
   .flow-desc, .flow-metrics, .algo-note {{ font-size: 12px; color: #444; margin: 0 0 6px; }}
   .mermaid-wrap {{
     border: 1px solid #ccc; background: #fafafa; padding: 8px 10px;
-    margin: 0 0 12px; overflow-x: auto;
+    margin: 0 0 12px; overflow-x: auto; min-height: 0;
   }}
-  pre.mermaid {{
+  .mermaid-host {{ text-align: center; }}
+  .mermaid-host svg {{ max-width: 100%; height: auto; }}
+  pre.mermaid-fallback {{
     margin: 0; background: transparent; border: none;
-    font-size: 12px; text-align: center; overflow: visible;
+    font-size: 11px; text-align: left; white-space: pre-wrap;
   }}
+  .mermaid-loading {{ font-size: 12px; color: #666; padding: 8px 0; }}
   /* per-model path */
   .model-path {{
     border: 1px solid #ddd; margin: 0 0 10px; padding: 6px 8px;
@@ -714,29 +717,108 @@ def build_html(
   </ul>
 
   <footer>
-    DSM-AE HTML report · Mermaid decision graphs implement algorithms from
+    DSM-AE HTML report · Mermaid decision graphs (lazy-loaded on expand) from
     criteria.py / decision_trees.py · NOT RUN = missing pack coverage ·
     generated from diagnosis JSON (gates + bootstraps + findings)
   </footer>
-  <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
   <script>
-    mermaid.initialize({{
-      startOnLoad: true,
-      theme: "neutral",
-      securityLevel: "loose",
-      flowchart: {{ htmlLabels: true, curve: "basis", useMaxWidth: true }}
-    }});
-    // Re-render when a <details> opens (lazy diagrams inside collapsed sections)
-    document.querySelectorAll("details.syndrome").forEach((d) => {{
-      d.addEventListener("toggle", () => {{
-        if (d.open) {{
-          const nodes = d.querySelectorAll("pre.mermaid:not([data-processed])");
-          if (nodes.length && window.mermaid) {{
-            mermaid.run({{ nodes }});
-          }}
+  (function () {{
+    // Performance: do NOT load mermaid or render any SVG until a syndrome
+    // section is opened. Sources live in <script type="text/plain"> so
+    // startOnLoad cannot process hundreds of graphs on first paint.
+    const MERMAID_CDN = "https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js";
+    let mermaidLoading = null;
+    let mermaidReady = false;
+
+    function loadMermaid() {{
+      if (mermaidReady && window.mermaid) return Promise.resolve(window.mermaid);
+      if (mermaidLoading) return mermaidLoading;
+      mermaidLoading = new Promise((resolve, reject) => {{
+        const s = document.createElement("script");
+        s.src = MERMAID_CDN;
+        s.async = true;
+        s.onload = () => {{
+          try {{
+            window.mermaid.initialize({{
+              startOnLoad: false,
+              theme: "neutral",
+              securityLevel: "loose",
+              flowchart: {{ htmlLabels: true, curve: "basis", useMaxWidth: true }}
+            }});
+            mermaidReady = true;
+            resolve(window.mermaid);
+          }} catch (e) {{ reject(e); }}
+        }};
+        s.onerror = () => reject(new Error("Failed to load mermaid.js"));
+        document.head.appendChild(s);
+      }});
+      return mermaidLoading;
+    }}
+
+    async function renderLazyIn(root) {{
+      const wraps = root.querySelectorAll
+        ? root.querySelectorAll("[data-lazy-mermaid]:not([data-rendered])")
+        : [];
+      if (!wraps.length) return;
+      wraps.forEach((w) => {{
+        const host = w.querySelector(".mermaid-host");
+        if (host) {{
+          host.hidden = false;
+          host.innerHTML = '<div class="mermaid-loading">Loading diagram…</div>';
         }}
       }});
+      let m;
+      try {{
+        m = await loadMermaid();
+      }} catch (e) {{
+        wraps.forEach((w) => {{
+          const host = w.querySelector(".mermaid-host");
+          if (host) host.textContent = "Diagram library failed to load.";
+        }});
+        return;
+      }}
+      const nodes = [];
+      wraps.forEach((w) => {{
+        const srcEl = w.querySelector("script.mermaid-src");
+        const host = w.querySelector(".mermaid-host");
+        if (!srcEl || !host) return;
+        const pre = document.createElement("pre");
+        pre.className = "mermaid";
+        pre.textContent = srcEl.textContent || "";
+        host.innerHTML = "";
+        host.appendChild(pre);
+        nodes.push(pre);
+        w.setAttribute("data-rendered", "1");
+      }});
+      if (nodes.length) {{
+        try {{
+          await m.run({{ nodes }});
+        }} catch (e) {{
+          console.warn("mermaid.run failed", e);
+        }}
+      }}
+    }}
+
+    document.querySelectorAll("details.syndrome").forEach((d) => {{
+      d.addEventListener("toggle", () => {{
+        if (d.open) renderLazyIn(d);
+      }});
+      // If somehow open on load (hash jump), render then
+      if (d.open) renderLazyIn(d);
     }});
+
+    // Hash navigation: open target syndrome and render its diagram only
+    function openHash() {{
+      if (!location.hash) return;
+      const el = document.querySelector(location.hash);
+      if (el && el.tagName === "DETAILS") {{
+        el.open = true;
+        renderLazyIn(el);
+      }}
+    }}
+    window.addEventListener("hashchange", openHash);
+    openHash();
+  }})();
   </script>
 </body>
 </html>
