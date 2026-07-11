@@ -40,7 +40,9 @@ def test_health_and_home(client: TestClient):
     assert b'data-nav="/matrix"' in r.content
     assert b"detectBase" in r.content or b"data-configured-base" in r.content
     assert b"location.reload" not in r.content
-    assert b"Jobs table refreshes every 5s" in r.content
+    assert b"pack-cb" in r.content  # multi-select packs
+    assert b"Test connection" in r.content
+    assert b"api_base" in r.content or b"f-api-base" in r.content
 
 
 def test_enqueue_list_api(client: TestClient):
@@ -139,3 +141,73 @@ def test_public_base_prefix_routes_work(client: TestClient):
     r = client.get("/dsm-ae/docs")
     assert r.status_code == 200
     assert "/dsm-ae/openapi.json" in r.text
+
+
+def test_enqueue_with_connection_and_progress(client: TestClient, tmp_path: Path):
+    r = client.post(
+        "/api/jobs",
+        json={
+            "model": "mock/well_attuned",
+            "packs": ["hello_metacog"],
+            "k": 1,
+            "api_base": "https://example.invalid/v1",
+            "api_key": "sk-test-not-returned",
+            "timeout": 30,
+        },
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert body["model"] == "mock/well_attuned"
+    assert body["api_base"] == "https://example.invalid/v1"
+    assert body["has_api_key"] is True
+    assert "api_key" not in body
+    assert "secret_path" not in body
+    assert body["progress"] is not None
+    assert body["progress"]["status"] == "queued"
+    jid = body["id"]
+    r = client.get(f"/api/jobs/{jid}/progress")
+    assert r.status_code == 200
+    assert r.json()["status"] == "queued"
+
+
+def test_test_connection_mock(client: TestClient):
+    r = client.post(
+        "/api/test-connection",
+        json={"model": "mock/well_attuned"},
+    )
+    assert r.status_code == 200
+    assert r.json()["ok"] is True
+
+
+def test_worker_writes_progress(tmp_path: Path):
+    from dsm_ae.queue.store import JobStore
+    from dsm_ae.queue.worker import run_one
+
+    reports = tmp_path / "reports"
+    reports.mkdir()
+    store = JobStore(tmp_path / "q.db")
+    jid = store.enqueue(model="mock/well_attuned", packs=["hello_metacog"], k=1)
+    from dsm_ae.queue.progress import progress_path_for, write_progress
+
+    prog = progress_path_for(reports, jid)
+    store.update_paths(jid, progress_path=str(prog))
+    write_progress(prog, {"job_id": jid, "status": "queued", "message": "q"})
+    ok = run_one(
+        store,
+        worker_id="t",
+        reports_dir=reports,
+        models_yaml=None,
+        rebuild_html=False,
+    )
+    assert ok is True
+    job = store.get(jid)
+    assert job is not None and job.status.value == "succeeded"
+    from dsm_ae.queue.progress import read_progress
+
+    p = read_progress(job.progress_path)
+    assert p is not None
+    assert p.get("status") in ("succeeded", "running", "done") or p.get("phase") in (
+        "done",
+        "scoring",
+        "running",
+    )

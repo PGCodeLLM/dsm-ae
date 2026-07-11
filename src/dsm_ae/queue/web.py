@@ -21,14 +21,23 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
+from dsm_ae.litellm_client import make_client
 from dsm_ae.packs.registry import list_packs
 from dsm_ae.queue.models import EvalJob
+from dsm_ae.queue.progress import (
+    progress_path_for,
+    read_progress,
+    secrets_path_for,
+    write_progress,
+    write_secret,
+)
 from dsm_ae.queue.store import JobStore
 from dsm_ae.queue.worker import default_worker_id, run_loop
+from dsm_ae.queue.web_html import render_queue_page
 
 
 class EnqueueBody(BaseModel):
-    model: str = Field(..., min_length=1, description="Model id (never an API key)")
+    model: str = Field(..., min_length=1, description="Model id (LiteLLM model name)")
     packs: list[str] | None = None
     packs_csv: str | None = None
     k: int = 3
@@ -37,11 +46,30 @@ class EnqueueBody(BaseModel):
     full_suite: bool = False
     priority: int = 0
     label: str | None = None
+    # LiteLLM-style connection (optional; falls back to models.yaml / mock)
+    api_base: str | None = None
+    api_key: str | None = Field(
+        default=None, description="Stored in a secrets file, never returned by API"
+    )
+    timeout: float | None = None
+    num_retries: int | None = None
+
+
+class ConnectionTestBody(BaseModel):
+    model: str = Field(..., min_length=1)
+    api_base: str | None = None
+    api_key: str | None = None
+    timeout: float | None = 30.0
+    num_retries: int | None = 0
 
 
 def _job_dict(job: EvalJob) -> dict[str, Any]:
     d = asdict(job)
     d["status"] = job.status.value
+    # Never expose secret file path or raw key material to clients.
+    d.pop("secret_path", None)
+    d["has_api_key"] = bool(job.secret_path)
+    d["progress"] = read_progress(job.progress_path)
     return d
 
 
@@ -120,12 +148,16 @@ def create_app(
         redoc_url=None,
         lifespan=lifespan,
     )
+    secrets_dir = db_path.parent / "job_secrets"
+    secrets_dir.mkdir(parents=True, exist_ok=True)
+
     app.state.store = store
     app.state.reports_dir = reports_dir
     app.state.models_yaml = yaml_path
     app.state.public_base = base
     app.state.token = resolved_token
     app.state.worker_thread = None
+    app.state.secrets_dir = secrets_dir
 
     # Optional dual-access: accept /dsm-ae/... when the prefix was NOT already
     # stripped (e.g. local curl http://127.0.0.1:8765/dsm-ae/api/jobs).
@@ -172,9 +204,65 @@ def create_app(
             raise HTTPException(status_code=401, detail="Invalid or missing token")
 
     def job_to_public(job: EvalJob) -> dict[str, Any]:
-        d = _job_dict(job)
-        # Never expose paths that might sit next to secrets; report paths are fine
-        return d
+        return _job_dict(job)
+
+    def _extra_from_body(timeout: float | None, num_retries: int | None) -> dict[str, Any] | None:
+        extra: dict[str, Any] = {}
+        if timeout is not None:
+            extra["timeout"] = float(timeout)
+        if num_retries is not None:
+            extra["num_retries"] = int(num_retries)
+        return extra or None
+
+    def _enqueue_from_fields(
+        *,
+        model: str,
+        packs: list[str] | None,
+        k: int,
+        concurrency: int,
+        rpm: float | None,
+        priority: int,
+        label: str | None,
+        api_base: str | None,
+        api_key: str | None,
+        timeout: float | None,
+        num_retries: int | None,
+    ) -> EvalJob:
+        model = model.strip()
+        api_base = (api_base or "").strip() or None
+        extra = _extra_from_body(timeout, num_retries)
+        jid = store.enqueue(
+            model=model,
+            packs=packs,
+            k=k,
+            concurrency=concurrency,
+            rpm=rpm,
+            priority=priority,
+            label=label,
+            api_base=api_base,
+            extra=extra,
+        )
+        prog = progress_path_for(reports_dir, jid)
+        store.update_paths(jid, progress_path=str(prog))
+        write_progress(
+            prog,
+            {
+                "job_id": jid,
+                "model": model,
+                "phase": "queued",
+                "status": "queued",
+                "done": 0,
+                "total": 0,
+                "message": "Queued — waiting for worker",
+            },
+        )
+        if api_key and api_key.strip():
+            sp = secrets_path_for(secrets_dir, jid)
+            write_secret(sp, api_key=api_key.strip())
+            store.update_paths(jid, secret_path=str(sp))
+        job = store.get(jid)
+        assert job is not None
+        return job
 
     # --- API -----------------------------------------------------------------
 
@@ -200,23 +288,75 @@ def create_app(
             raise HTTPException(404, "Job not found")
         return job_to_public(job)
 
+    @app.get("/api/jobs/{job_id}/progress")
+    def api_job_progress(job_id: str) -> dict[str, Any]:
+        job = _resolve(store, job_id)
+        if job is None:
+            raise HTTPException(404, "Job not found")
+        prog = read_progress(job.progress_path) or {
+            "job_id": job.id,
+            "status": job.status.value,
+            "message": job.status.value,
+        }
+        return prog
+
+    @app.post("/api/test-connection")
+    def api_test_connection(
+        body: ConnectionTestBody,
+        _: None = Depends(require_token),
+    ) -> dict[str, Any]:
+        model = body.model.strip()
+        if model.startswith("mock/"):
+            return {
+                "ok": True,
+                "message": f"Offline mock persona '{model.split('/', 1)[-1]}' — no network call",
+            }
+        extra: dict[str, Any] = {}
+        if body.timeout is not None:
+            extra["timeout"] = float(body.timeout)
+        if body.num_retries is not None:
+            extra["num_retries"] = int(body.num_retries)
+        try:
+            client = make_client(
+                model,
+                models_yaml=yaml_path,
+                api_base=(body.api_base or "").strip() or None,
+                api_key=(body.api_key or "").strip() or None,
+                extra=extra or None,
+            )
+            result = client.complete(
+                [{"role": "user", "content": "Reply with the single word: pong"}],
+                max_tokens=16,
+                temperature=0.0,
+            )
+            text = (result.content or "").strip()
+            return {
+                "ok": True,
+                "message": f"Endpoint OK — model replied: {text[:200]!r}",
+                "preview": text[:200],
+            }
+        except Exception as e:
+            return {"ok": False, "message": f"{type(e).__name__}: {e}"}
+
     @app.post("/api/jobs")
     def api_enqueue(
         body: EnqueueBody,
         _: None = Depends(require_token),
     ) -> dict[str, Any]:
         pack_list = _parse_packs_list(body.packs, body.packs_csv, body.full_suite)
-        jid = store.enqueue(
-            model=body.model.strip(),
+        job = _enqueue_from_fields(
+            model=body.model,
             packs=pack_list,
             k=body.k,
             concurrency=body.concurrency,
             rpm=body.rpm,
             priority=body.priority,
             label=body.label,
+            api_base=body.api_base,
+            api_key=body.api_key,
+            timeout=body.timeout,
+            num_retries=body.num_retries,
         )
-        job = store.get(jid)
-        assert job is not None
         return job_to_public(job)
 
     @app.post("/api/jobs/{job_id}/cancel")
@@ -245,12 +385,12 @@ def create_app(
 
     @app.get("/", response_class=HTMLResponse)
     def home() -> HTMLResponse:
-        return HTMLResponse(_page(store, href, app.state.token is not None, title="DSM-AE"))
+        return HTMLResponse(render_queue_page(store, href, app.state.token is not None, title="DSM-AE"))
 
     @app.get("/queue", response_class=HTMLResponse)
     def queue_page() -> HTMLResponse:
         return HTMLResponse(
-            _page(store, href, app.state.token is not None, title="Queue")
+            render_queue_page(store, href, app.state.token is not None, title="Queue")
         )
 
     @app.post("/queue")
@@ -263,6 +403,9 @@ def create_app(
         full_suite: Optional[str] = Form(None),
         priority: int = Form(0),
         label: str = Form(""),
+        api_base: str = Form(""),
+        api_key: str = Form(""),
+        timeout: Optional[float] = Form(None),
         token_field: str = Form("", alias="token"),
     ) -> RedirectResponse:
         expected = app.state.token
@@ -279,13 +422,18 @@ def create_app(
         pack_list = _parse_packs_list(
             None, packs or None, full_suite is not None and full_suite != ""
         )
-        store.enqueue(
-            model=model.strip(),
+        _enqueue_from_fields(
+            model=model,
             packs=pack_list,
             k=k,
             concurrency=concurrency,
+            rpm=None,
             priority=priority,
             label=label.strip() or None,
+            api_base=api_base or None,
+            api_key=api_key or None,
+            timeout=timeout,
+            num_retries=2,
         )
         return RedirectResponse(href("/queue"), status_code=303)
 
@@ -318,358 +466,3 @@ def _resolve(store: JobStore, job_id: str) -> EvalJob | None:
         if len(matches) == 1:
             return matches[0]
     return None
-
-
-def _page(store: JobStore, href, auth_required: bool, title: str) -> str:
-    packs = list_packs()
-    pack_opts = "\n".join(f'<option value="{_esc(p)}">{_esc(p)}</option>' for p in packs)
-    token_row = ""
-    if auth_required:
-        token_row = """
-        <label>Token
-          <input type="password" name="token" id="token" placeholder="queue token"
-                 autocomplete="off" data-persist="token"/>
-        </label>
-        """
-    # Derive configured base from href helper (e.g. "/dsm-ae"); JS re-detects live.
-    sample = href("/queue")
-    configured_base = ""
-    if sample.startswith("/") and sample.endswith("/queue"):
-        configured_base = sample[: -len("/queue")]
-    return f"""<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="utf-8"/>
-<meta name="viewport" content="width=device-width, initial-scale=1"/>
-<title>{_esc(title)} · DSM-AE Eval Queue</title>
-<style>
-  :root {{ font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; }}
-  body {{ margin: 0; padding: 16px 18px; background: #fafafa; color: #111; }}
-  h1 {{ font-size: 1.25rem; margin: 0 0 4px; }}
-  h2 {{ font-size: 1.05rem; margin: 18px 0 8px; }}
-  .meta {{ color: #555; font-size: 13px; margin: 0 0 12px; }}
-  nav a {{ margin-right: 12px; color: #0645ad; }}
-  .panel {{ background: #fff; border: 1px solid #ddd; border-radius: 6px;
-            padding: 12px 14px; margin: 0 0 14px; }}
-  table {{ border-collapse: collapse; width: 100%; font-size: 13px; }}
-  th, td {{ border: 1px solid #e0e0e0; padding: 4px 6px; text-align: left; vertical-align: top; }}
-  th {{ background: #f5f5f5; }}
-  form.enqueue label {{ display: block; margin: 0 0 8px; font-size: 13px; }}
-  form.enqueue input[type=text], form.enqueue input[type=number],
-  form.enqueue input[type=password], form.enqueue select {{
-    width: min(420px, 100%); padding: 4px 6px; margin-top: 2px;
-  }}
-  form.enqueue button, button.action {{
-    background: #1565c0; color: #fff; border: 0; border-radius: 4px;
-    padding: 6px 12px; cursor: pointer; font-size: 13px;
-  }}
-  button.action {{ background: #555; padding: 2px 8px; font-size: 12px; }}
-  button.action:disabled {{ opacity: 0.5; cursor: not-allowed; }}
-  code {{ font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; }}
-  .hint {{ color: #666; font-size: 12px; }}
-  .hint .ok {{ color: #2e7d32; }}
-  .hint .err {{ color: #c62828; }}
-  .status {{ color: #fff; padding: 1px 6px; border-radius: 3px; font-size: 12px; }}
-  .st-queued {{ background: #0288d1; }}
-  .st-running {{ background: #f9a825; color: #111; }}
-  .st-succeeded {{ background: #2e7d32; }}
-  .st-failed {{ background: #c62828; }}
-  .st-cancelled {{ background: #757575; }}
-  #flash {{ margin: 0 0 10px; font-size: 13px; min-height: 1.2em; }}
-  #flash.ok {{ color: #2e7d32; }}
-  #flash.err {{ color: #c62828; }}
-</style>
-</head>
-<body data-configured-base="{_esc(configured_base)}">
-  <h1>DSM-AE evaluation queue</h1>
-  <p class="meta">Enqueue models for diagnosis · credentials stay in models.yaml · jobs never store API keys</p>
-  <nav>
-    <a href="{href("/")}" data-nav="/">Queue</a>
-    <a href="{href("/matrix")}" data-nav="/matrix" target="_blank" rel="noopener">Comparison matrix</a>
-    <a href="{href("/reports/")}" data-nav="/reports/" target="_blank" rel="noopener">Reports</a>
-    <a href="{href("/docs")}" data-nav="/docs" target="_blank" rel="noopener">API docs</a>
-  </nav>
-  <div id="flash" role="status" aria-live="polite"></div>
-
-  <div class="panel">
-    <h2>Jobs <span id="jobs-updated" class="hint"></span></h2>
-    <table>
-      <thead>
-        <tr>
-          <th>ID</th><th>Status</th><th>Model</th><th>k</th><th>Packs</th>
-          <th>Label</th><th>Created</th><th>Error</th><th></th>
-        </tr>
-      </thead>
-      <tbody id="jobs-body">
-        <tr><td colspan="9" style="color:#666">Loading…</td></tr>
-      </tbody>
-    </table>
-    <p class="hint">Jobs table refreshes every 5s without reloading the page (form fields stay intact). Cancel: queued only; retry: failed/cancelled.</p>
-  </div>
-
-  <div class="panel">
-    <h2>Enqueue</h2>
-    <form class="enqueue" id="enqueue-form" method="post" action="{href("/queue")}">
-      {token_row}
-      <label>Model id
-        <input type="text" name="model" id="f-model" required
-               placeholder="mock/well_attuned or gpt-5.6-terra"
-               autocomplete="off" data-persist="model"/>
-      </label>
-      <label>Packs (comma-separated; leave empty for all / default)
-        <input type="text" name="packs" id="f-packs" list="packlist"
-               placeholder="hello_metacog,overeager_mini" data-persist="packs"/>
-        <datalist id="packlist">{pack_opts}</datalist>
-      </label>
-      <label><input type="checkbox" name="full_suite" id="f-full" value="1" data-persist="full_suite"/> Full suite (all registered packs)</label>
-      <label>k (bootstrap trials)
-        <input type="number" name="k" id="f-k" value="3" min="1" max="50" data-persist="k"/>
-      </label>
-      <label>Concurrency (pack×trial)
-        <input type="number" name="concurrency" id="f-concurrency" value="1" min="1" max="32" data-persist="concurrency"/>
-      </label>
-      <label>Priority
-        <input type="number" name="priority" id="f-priority" value="0" data-persist="priority"/>
-      </label>
-      <label>Label (optional)
-        <input type="text" name="label" id="f-label" placeholder="demo-run" data-persist="label"/>
-      </label>
-      <button type="submit" id="enqueue-btn">Enqueue</button>
-    </form>
-  </div>
-
-<script>
-(function () {{
-  const AUTH_REQUIRED = {json.dumps(auth_required)};
-  const STORAGE_KEY = "dsm-ae-queue-form-v1";
-  const POLL_MS = 5000;
-
-  // Resolve public base so the same server works on :8765 and funnel /dsm-ae.
-  function detectBase() {{
-    const p = location.pathname || "/";
-    if (p === "/dsm-ae" || p.startsWith("/dsm-ae/")) return "/dsm-ae";
-    const configured = (document.body.dataset.configuredBase || "").replace(/\\/$/, "");
-    if (configured && (p === configured || p.startsWith(configured + "/"))) {{
-      return configured;
-    }}
-    // Local root (or any non-prefixed path): never force funnel prefix.
-    return "";
-  }}
-  const BASE = detectBase();
-  function href(path) {{
-    if (!path.startsWith("/")) path = "/" + path;
-    return BASE + path;
-  }}
-  const API_JOBS = href("/api/jobs");
-
-  // Wire nav + form action to the live base (avoids hard-coded /dsm-ae on localhost).
-  document.querySelectorAll("a[data-nav]").forEach((a) => {{
-    a.setAttribute("href", href(a.getAttribute("data-nav") || "/"));
-  }});
-  const formEl = document.getElementById("enqueue-form");
-  if (formEl) formEl.setAttribute("action", href("/queue"));
-
-  function flash(msg, ok) {{
-    const el = document.getElementById("flash");
-    el.textContent = msg || "";
-    el.className = msg ? (ok ? "ok" : "err") : "";
-  }}
-
-  function authHeaders() {{
-    const headers = {{}};
-    const tok = document.getElementById("token");
-    if (tok && tok.value) {{
-      headers["Authorization"] = "Bearer " + tok.value;
-      headers["X-DSM-AE-Token"] = tok.value;
-    }}
-    return headers;
-  }}
-
-  function persistForm() {{
-    const data = {{}};
-    document.querySelectorAll("[data-persist]").forEach((el) => {{
-      const k = el.getAttribute("data-persist");
-      if (el.type === "checkbox") data[k] = el.checked;
-      else data[k] = el.value;
-    }});
-    try {{ sessionStorage.setItem(STORAGE_KEY, JSON.stringify(data)); }} catch (e) {{}}
-  }}
-
-  function restoreForm() {{
-    let data = null;
-    try {{ data = JSON.parse(sessionStorage.getItem(STORAGE_KEY) || "null"); }} catch (e) {{}}
-    if (!data) return;
-    document.querySelectorAll("[data-persist]").forEach((el) => {{
-      const k = el.getAttribute("data-persist");
-      if (!(k in data)) return;
-      if (el.type === "checkbox") el.checked = !!data[k];
-      else if (data[k] !== undefined && data[k] !== null) el.value = data[k];
-    }});
-  }}
-
-  function esc(s) {{
-    return String(s == null ? "" : s)
-      .replace(/&/g, "&amp;").replace(/</g, "&lt;")
-      .replace(/>/g, "&gt;").replace(/"/g, "&quot;");
-  }}
-
-  function badge(status) {{
-    return '<span class="status st-' + esc(status) + '">' + esc(status) + "</span>";
-  }}
-
-  function renderJobs(jobs) {{
-    const tbody = document.getElementById("jobs-body");
-    if (!jobs || !jobs.length) {{
-      tbody.innerHTML = '<tr><td colspan="9" style="color:#666">No jobs yet — enqueue below.</td></tr>';
-      return;
-    }}
-    tbody.innerHTML = jobs.map((j) => {{
-      const packs = (j.packs && j.packs.length) ? j.packs.join(",") : "—";
-      let err = j.error || "";
-      if (err.length > 120) err = err.slice(0, 120) + "…";
-      let actions = "";
-      if (j.status === "queued") {{
-        actions = '<button type="button" class="action" data-act="cancel" data-id="' +
-          esc(j.id) + '">cancel</button>';
-      }} else if (j.status === "failed" || j.status === "cancelled") {{
-        actions = '<button type="button" class="action" data-act="retry" data-id="' +
-          esc(j.id) + '">retry</button>';
-      }}
-      return "<tr>" +
-        '<td><code title="' + esc(j.id) + '">' + esc(j.id.slice(0, 8)) + "</code></td>" +
-        "<td>" + badge(j.status) + "</td>" +
-        "<td><code>" + esc(j.model) + "</code></td>" +
-        "<td>" + esc(j.k) + "</td>" +
-        '<td style="max-width:180px;overflow:hidden;text-overflow:ellipsis">' + esc(packs) + "</td>" +
-        "<td>" + esc(j.label || "") + "</td>" +
-        '<td style="font-size:11px">' + esc(j.created_at || "") + "</td>" +
-        '<td style="font-size:11px;color:#a00">' + esc(err) + "</td>" +
-        "<td>" + actions + "</td></tr>";
-    }}).join("");
-  }}
-
-  async function refreshJobs() {{
-    try {{
-      const res = await fetch(API_JOBS + "?limit=100", {{ cache: "no-store" }});
-      if (!res.ok) throw new Error("HTTP " + res.status);
-      const jobs = await res.json();
-      renderJobs(jobs);
-      const u = document.getElementById("jobs-updated");
-      u.textContent = "· updated " + new Date().toLocaleTimeString();
-      u.className = "hint ok";
-    }} catch (e) {{
-      const u = document.getElementById("jobs-updated");
-      u.textContent = "· refresh failed";
-      u.className = "hint err";
-    }}
-  }}
-
-  async function jobAction(act, id, btn) {{
-    if (AUTH_REQUIRED) {{
-      const tok = document.getElementById("token");
-      if (!tok || !tok.value) {{
-        flash("Token required for " + act, false);
-        return;
-      }}
-    }}
-    if (btn) btn.disabled = true;
-    try {{
-      const res = await fetch(API_JOBS + "/" + encodeURIComponent(id) + "/" + act, {{
-        method: "POST",
-        headers: authHeaders(),
-      }});
-      if (!res.ok) {{
-        const t = await res.text();
-        flash(act + " failed: " + res.status + " " + t, false);
-        // Refresh so buttons match reality (e.g. job already finished).
-        await refreshJobs();
-        return;
-      }}
-      flash(act + " ok", true);
-      await refreshJobs();
-    }} catch (e) {{
-      flash(String(e), false);
-      await refreshJobs();
-    }} finally {{
-      if (btn) btn.disabled = false;
-    }}
-  }}
-
-  document.getElementById("jobs-body").addEventListener("click", (ev) => {{
-    const btn = ev.target.closest("button[data-act]");
-    if (!btn) return;
-    jobAction(btn.getAttribute("data-act"), btn.getAttribute("data-id"), btn);
-  }});
-
-  const form = document.getElementById("enqueue-form");
-  form.addEventListener("input", persistForm);
-  form.addEventListener("change", persistForm);
-
-  form.addEventListener("submit", async (ev) => {{
-    ev.preventDefault();
-    persistForm();
-    if (AUTH_REQUIRED) {{
-      const tok = document.getElementById("token");
-      if (!tok || !tok.value) {{
-        flash("Token required to enqueue", false);
-        return;
-      }}
-    }}
-    const btn = document.getElementById("enqueue-btn");
-    btn.disabled = true;
-    try {{
-      const fd = new FormData(form);
-      // Prefer JSON API so we can keep the form without a full navigation.
-      const packsCsv = (fd.get("packs") || "").toString().trim();
-      const body = {{
-        model: (fd.get("model") || "").toString().trim(),
-        packs_csv: packsCsv || null,
-        k: parseInt(fd.get("k") || "3", 10),
-        concurrency: parseInt(fd.get("concurrency") || "1", 10),
-        priority: parseInt(fd.get("priority") || "0", 10),
-        full_suite: fd.get("full_suite") != null,
-        label: ((fd.get("label") || "").toString().trim() || null),
-      }};
-      const res = await fetch(API_JOBS, {{
-        method: "POST",
-        headers: Object.assign({{ "Content-Type": "application/json" }}, authHeaders()),
-        body: JSON.stringify(body),
-      }});
-      if (!res.ok) {{
-        const t = await res.text();
-        flash("Enqueue failed: " + res.status + " " + t, false);
-        return;
-      }}
-      const job = await res.json();
-      flash("Enqueued " + (job.id || "").slice(0, 8) + " · " + job.model, true);
-      // Clear model/label after success so re-submit is intentional; keep token/k/etc.
-      const model = document.getElementById("f-model");
-      const label = document.getElementById("f-label");
-      if (model) model.value = "";
-      if (label) label.value = "";
-      persistForm();
-      await refreshJobs();
-    }} catch (e) {{
-      flash(String(e), false);
-    }} finally {{
-      btn.disabled = false;
-    }}
-  }});
-
-  restoreForm();
-  refreshJobs();
-  setInterval(refreshJobs, POLL_MS);
-}})();
-</script>
-</body>
-</html>
-"""
-
-
-def _esc(s: str) -> str:
-    return (
-        s.replace("&", "&amp;")
-        .replace("<", "&lt;")
-        .replace(">", "&gt;")
-        .replace('"', "&quot;")
-    )

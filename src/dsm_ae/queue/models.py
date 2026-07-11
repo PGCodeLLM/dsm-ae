@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import Enum
+from typing import Any
 
 
 class JobStatus(str, Enum):
@@ -34,3 +35,9 @@ class EvalJob:
     out_json: str | None
     work_dir: str | None
     label: str | None
+    # LiteLLM-style connection (api_key never stored in this object from DB —
+    # only a flag + optional secret file path).
+    api_base: str | None = None
+    secret_path: str | None = None
+    progress_path: str | None = None
+    extra: dict[str, Any] | None = None

@@ -8,9 +8,15 @@ import time
 import traceback
 import uuid
 from pathlib import Path
+from typing import Any
 
 from dsm_ae.diagnose import diagnose
 from dsm_ae.queue.paths import job_report_paths
+from dsm_ae.queue.progress import (
+    progress_path_for,
+    read_secret,
+    write_progress,
+)
 from dsm_ae.queue.store import JobStore
 from dsm_ae.report import render_markdown
 
@@ -33,6 +39,7 @@ def run_one(
     On failure the job is marked failed (no auto-retry). ``max_attempts`` is
     reserved for a future auto-retry policy; use ``queue retry`` to re-queue
     manually. Prefer job.out_md / job.out_json when set, else default paths.
+    Writes a progress JSON file under reports/queue/progress/ for the UI.
     """
     job = store.claim_next(worker_id)
     if job is None:
@@ -44,6 +51,42 @@ def run_one(
     md_path = Path(job.out_md) if job.out_md else default_md
     json_path = Path(job.out_json) if job.out_json else default_json
     work = Path(job.work_dir) if job.work_dir else reports_dir / "work" / job.id[:8]
+    prog_path = (
+        Path(job.progress_path)
+        if job.progress_path
+        else progress_path_for(reports_dir, job.id)
+    )
+    store.update_paths(job.id, progress_path=str(prog_path))
+
+    def on_progress(payload: dict[str, Any]) -> None:
+        write_progress(
+            prog_path,
+            {
+                "job_id": job.id,
+                "model": job.model,
+                **payload,
+            },
+        )
+
+    api_key = None
+    secret = read_secret(job.secret_path)
+    if secret:
+        api_key = secret.get("api_key") or None
+        if api_key == "":
+            api_key = None
+
+    write_progress(
+        prog_path,
+        {
+            "job_id": job.id,
+            "model": job.model,
+            "phase": "claimed",
+            "status": "running",
+            "done": 0,
+            "total": 0,
+            "message": f"Claimed by {worker_id}",
+        },
+    )
     try:
         report = diagnose(
             model=job.model,
@@ -53,7 +96,11 @@ def run_one(
             rpm=job.rpm,
             scaffold=job.scaffold,
             models_yaml=models_yaml,
+            api_base=job.api_base,
+            api_key=api_key,
             work_dir=work,
+            on_progress=on_progress,
+            client_extra=job.extra,
         )
         md_path.parent.mkdir(parents=True, exist_ok=True)
         md_path.write_text(render_markdown(report), encoding="utf-8")
@@ -62,11 +109,37 @@ def run_one(
             payload["traces"] = f"<{len(report.traces)} traces omitted>"
         json_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
         store.mark_succeeded(job.id, out_md=str(md_path), out_json=str(json_path))
+        write_progress(
+            prog_path,
+            {
+                "job_id": job.id,
+                "model": job.model,
+                "phase": "done",
+                "status": "succeeded",
+                "done": 1,
+                "total": 1,
+                "percent": 100.0,
+                "message": "Report written",
+                "out_json": str(json_path),
+            },
+        )
         if rebuild_html:
             _rebuild_matrix(reports_dir, matrix_out)
         return True
     except Exception:
-        store.mark_failed(job.id, traceback.format_exc())
+        err = traceback.format_exc()
+        store.mark_failed(job.id, err)
+        write_progress(
+            prog_path,
+            {
+                "job_id": job.id,
+                "model": job.model,
+                "phase": "failed",
+                "status": "failed",
+                "message": err.splitlines()[-1] if err else "failed",
+                "error": err[:2000],
+            },
+        )
         return False
 
 

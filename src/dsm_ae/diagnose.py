@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import tempfile
 import threading
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -78,6 +79,8 @@ def diagnose(
     max_turns: int = 10,
     concurrency: int = 1,
     rpm: float | None = None,
+    on_progress: Callable[[dict[str, Any]], None] | None = None,
+    client_extra: dict[str, Any] | None = None,
 ) -> DiagnosisReport:
     packs = packs or list_packs()
     inferred_rpm = _infer_rpm(models_yaml, model, rpm)
@@ -100,6 +103,7 @@ def diagnose(
         models_yaml=models_yaml,
         api_base=api_base,
         api_key=api_key,
+        extra=client_extra,
     )
     client: ModelClient = (
         LockedClient(raw_client) if concurrency and concurrency > 1 else raw_client
@@ -121,10 +125,34 @@ def diagnose(
     jobs: list[tuple[str, int]] = [
         (pack_id, trial_i) for pack_id in packs for trial_i in range(k)
     ]
+    total = len(jobs)
+    done_lock = threading.Lock()
+    done_count = 0
+
+    def _emit(payload: dict[str, Any]) -> None:
+        if on_progress is None:
+            return
+        try:
+            on_progress(payload)
+        except Exception:
+            pass
+
+    _emit(
+        {
+            "phase": "starting",
+            "status": "running",
+            "done": 0,
+            "total": total,
+            "message": f"Starting {total} pack×trial jobs",
+            "packs": list(packs),
+            "k": k,
+        }
+    )
 
     limiter = RateLimiter(inferred_rpm)
 
     def _run_job(job: tuple[str, int]) -> list[tuple[str, TrialTrace, list[MetricResult]]]:
+        nonlocal done_count
         pack_id, trial_i = job
         pack = get_pack(pack_id)
         # set_trial for mock personas
@@ -136,6 +164,20 @@ def diagnose(
         out: list[tuple[str, TrialTrace, list[MetricResult]]] = []
         for tr in traces:
             out.append((pack_id, tr, pack.score(tr)))
+        with done_lock:
+            done_count += 1
+            cur = done_count
+        _emit(
+            {
+                "phase": "running",
+                "status": "running",
+                "done": cur,
+                "total": total,
+                "current_pack": pack_id,
+                "current_trial": trial_i,
+                "message": f"{pack_id} trial {trial_i + 1}/{k} complete ({cur}/{total})",
+            }
+        )
         return out
 
     # Rate limit is applied at job start when concurrency>1 via map_pool
@@ -154,6 +196,16 @@ def diagnose(
             for m in scores:
                 bucket.setdefault(m.metric_id, []).append(m)
 
+    _emit(
+        {
+            "phase": "scoring",
+            "status": "running",
+            "done": total,
+            "total": total,
+            "message": "Scoring metrics and findings",
+        }
+    )
+
     bootstraps = [
         bootstrap_metric(
             mid,
@@ -168,7 +220,7 @@ def diagnose(
     gates = build_gate_matrix(bootstraps)
     findings = evaluate_findings(bootstraps)
 
-    return DiagnosisReport(
+    report = DiagnosisReport(
         scaffold_card=card,
         packs=packs,
         k_trials=k,
@@ -178,6 +230,17 @@ def diagnose(
         traces=all_traces if keep_traces else [],
         notes=notes,
     )
+    _emit(
+        {
+            "phase": "done",
+            "status": "succeeded",
+            "done": total,
+            "total": total,
+            "message": "Diagnosis complete",
+            "findings_present": sum(1 for f in findings if f.present),
+        }
+    )
+    return report
 
 
 def diagnose_to_markdown(**kwargs: Any) -> tuple[DiagnosisReport, str]:
