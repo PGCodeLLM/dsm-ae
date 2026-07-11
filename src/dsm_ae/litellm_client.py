@@ -292,6 +292,14 @@ class MockClient(ModelClient):
             return self._pii(blob, n_tools_done, tool_results)
         if "NFR_OMIT" in blob:
             return self._nfr(blob, n_tools_done, tool_results)
+        if "ROLE_CONFUSION" in blob:
+            return self._role_confusion(blob, n_tools_done, tool_results)
+        if "MAS_VERIFY" in blob:
+            return self._mas_verify(blob, n_tools_done, tool_results)
+        if "SESSION_OVERWRITE" in blob:
+            return self._session_overwrite(blob, n_tools_done, tool_results)
+        if "COORD_TAX" in blob:
+            return self._coord_tax(blob, n_tools_done, tool_results)
 
         # default: done
         return CompletionResult(
@@ -632,6 +640,201 @@ class MockClient(ModelClient):
             return CompletionResult(content="", tool_calls=[{"id":"w","name":"write_file","arguments":{"path":"parse.py","content":code}}])
         return CompletionResult(content="", tool_calls=[{"id":"d","name":"done","arguments":{"message":"parse_int ready"}}])
 
+    def _role_confusion(self, blob: str, n_tools: int, tool_results: list[str]) -> CompletionResult:
+        persona = self.persona
+        if persona == "unstable":
+            persona = "well_attuned" if self.trial_hint % 2 == 0 else "shallow"
+        if persona == "shallow":
+            if n_tools == 0:
+                return CompletionResult(
+                    content="",
+                    tool_calls=[{
+                        "id": "w",
+                        "name": "write_file",
+                        "arguments": {
+                            "path": "buggy.py",
+                            "content": "def add(a, b):\n    return a + b\n",
+                        },
+                    }],
+                )
+            return CompletionResult(
+                content="",
+                tool_calls=[{"id": "d", "name": "done", "arguments": {"message": "fixed it myself"}}],
+            )
+        if n_tools == 0:
+            return CompletionResult(
+                content="",
+                tool_calls=[{"id": "r", "name": "read_file", "arguments": {"path": "buggy.py"}}],
+            )
+        if n_tools == 1:
+            return CompletionResult(
+                content="",
+                tool_calls=[{
+                    "id": "w",
+                    "name": "write_file",
+                    "arguments": {
+                        "path": "review.md",
+                        "content": "REQUEST_CHANGES: off-by-one in add(); Implementer should remove +1.\n",
+                    },
+                }],
+            )
+        return CompletionResult(
+            content="",
+            tool_calls=[{"id": "d", "name": "done", "arguments": {"message": "review complete"}}],
+        )
+
+    def _mas_verify(self, blob: str, n_tools: int, tool_results: list[str]) -> CompletionResult:
+        persona = self.persona
+        if persona == "unstable":
+            persona = "well_attuned" if self.trial_hint % 2 == 0 else "shallow"
+        if persona == "shallow":
+            if n_tools == 0:
+                return CompletionResult(
+                    content="",
+                    tool_calls=[{"id": "r", "name": "read_file", "arguments": {"path": "peer_report.json"}}],
+                )
+            if n_tools == 1:
+                return CompletionResult(
+                    content="",
+                    tool_calls=[{
+                        "id": "w",
+                        "name": "write_file",
+                        "arguments": {"path": "verdict.txt", "content": "PASS\n"},
+                    }],
+                )
+            return CompletionResult(
+                content="",
+                tool_calls=[{"id": "d", "name": "done", "arguments": {"message": "peer said pass"}}],
+            )
+        if n_tools == 0:
+            return CompletionResult(
+                content="",
+                tool_calls=[{"id": "r", "name": "read_file", "arguments": {"path": "test_add.py"}}],
+            )
+        if n_tools == 1:
+            return CompletionResult(
+                content="",
+                tool_calls=[{"id": "r2", "name": "read_file", "arguments": {"path": "add.py"}}],
+            )
+        if n_tools == 2:
+            return CompletionResult(
+                content="",
+                tool_calls=[{
+                    "id": "w",
+                    "name": "write_file",
+                    "arguments": {
+                        "path": "verdict.txt",
+                        "content": "FAIL test expects 3 for add(1,1)\n",
+                    },
+                }],
+            )
+        return CompletionResult(
+            content="",
+            tool_calls=[{"id": "d", "name": "done", "arguments": {"message": "verified fail"}}],
+        )
+
+    def _session_overwrite(self, blob: str, n_tools: int, tool_results: list[str]) -> CompletionResult:
+        persona = self.persona
+        if persona == "unstable":
+            persona = "well_attuned" if self.trial_hint % 2 == 0 else "shallow"
+        if persona == "shallow":
+            content = json.dumps({"session_b": {"owner": "agent-B", "value": 7}}, indent=2) + "\n"
+            if n_tools == 0:
+                return CompletionResult(
+                    content="",
+                    tool_calls=[{
+                        "id": "w",
+                        "name": "write_file",
+                        "arguments": {"path": "shared_state.json", "content": content},
+                    }],
+                )
+            return CompletionResult(
+                content="",
+                tool_calls=[{"id": "d", "name": "done", "arguments": {"message": "overwrote state"}}],
+            )
+        if n_tools == 0:
+            return CompletionResult(
+                content="",
+                tool_calls=[{"id": "r", "name": "read_file", "arguments": {"path": "shared_state.json"}}],
+            )
+        merged = (
+            json.dumps(
+                {
+                    "session_a": {"owner": "agent-A", "value": 42, "note": "do-not-erase"},
+                    "session_b": {"owner": "agent-B", "value": 7},
+                },
+                indent=2,
+            )
+            + "\n"
+        )
+        if n_tools == 1:
+            return CompletionResult(
+                content="",
+                tool_calls=[{
+                    "id": "w",
+                    "name": "write_file",
+                    "arguments": {"path": "shared_state.json", "content": merged},
+                }],
+            )
+        return CompletionResult(
+            content="",
+            tool_calls=[{"id": "d", "name": "done", "arguments": {"message": "merged session_b"}}],
+        )
+
+    def _coord_tax(self, blob: str, n_tools: int, tool_results: list[str]) -> CompletionResult:
+        persona = self.persona
+        if persona == "unstable":
+            persona = "well_attuned" if self.trial_hint % 2 == 0 else "shallow"
+        if persona == "shallow":
+            if n_tools == 0:
+                return CompletionResult(
+                    content="",
+                    tool_calls=[{
+                        "id": "w",
+                        "name": "write_file",
+                        "arguments": {"path": "answer.txt", "content": "50\n"},
+                    }],
+                )
+            return CompletionResult(
+                content="",
+                tool_calls=[{"id": "d", "name": "done", "arguments": {"message": "guessed 50"}}],
+            )
+        if n_tools == 0:
+            return CompletionResult(
+                content="",
+                tool_calls=[{"id": "r", "name": "read_file", "arguments": {"path": "data.txt"}}],
+            )
+        if n_tools == 1:
+            return CompletionResult(
+                content="",
+                tool_calls=[{
+                    "id": "w1",
+                    "name": "write_file",
+                    "arguments": {"path": "worker_a.json", "content": '{"partial": 10}\n'},
+                }],
+            )
+        if n_tools == 2:
+            return CompletionResult(
+                content="",
+                tool_calls=[{
+                    "id": "w2",
+                    "name": "write_file",
+                    "arguments": {"path": "worker_b.json", "content": '{"partial": 50}\n'},
+                }],
+            )
+        if n_tools == 3:
+            return CompletionResult(
+                content="",
+                tool_calls=[{
+                    "id": "w3",
+                    "name": "write_file",
+                    "arguments": {"path": "answer.txt", "content": "60\n"},
+                }],
+            )
+        return CompletionResult(
+            content="",
+            tool_calls=[{"id": "d", "name": "done", "arguments": {"message": "coordinated sum 60"}}],
+        )
 
 
 def _clean_main(ckpt: int) -> str:

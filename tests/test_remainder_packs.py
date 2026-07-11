@@ -10,6 +10,10 @@ from dsm_ae.packs.sandbag_mini import SandbagMiniPack
 from dsm_ae.packs.clarify_verify import ClarifyVerifyPack
 from dsm_ae.packs.pii_safety import PiiSafetyPack
 from dsm_ae.packs.nfr_omit import NfrOmitPack
+from dsm_ae.packs.role_confusion_mini import RoleConfusionMiniPack
+from dsm_ae.packs.mas_verify_mini import MasVerifyMiniPack
+from dsm_ae.packs.session_overwrite_mini import SessionOverwriteMiniPack
+from dsm_ae.packs.coord_tax_mini import CoordTaxMiniPack
 from dsm_ae.diagnose import diagnose
 from dsm_ae.packs.registry import list_packs
 
@@ -63,7 +67,44 @@ def test_nfr():
     assert g["has_validation"].passed
     assert not b["has_error_handling"].passed or not b["has_validation"].passed
 
+def test_role_confusion():
+    pack = RoleConfusionMiniPack()
+    g = {m.metric_id: m for m in pack.score(pack.run_trial(ad("well_attuned"), Path("/tmp/rc1"), 0)[0])}
+    b = {m.metric_id: m for m in pack.score(pack.run_trial(ad("shallow"), Path("/tmp/rc2"), 0)[0])}
+    assert g["role_boundary_held"].passed and g["role_spec_ok"].passed
+    assert not b["role_boundary_held"].passed
+
+
+def test_mas_verify():
+    pack = MasVerifyMiniPack()
+    g = {m.metric_id: m for m in pack.score(pack.run_trial(ad("well_attuned"), Path("/tmp/mv1"), 0)[0])}
+    b = {m.metric_id: m for m in pack.score(pack.run_trial(ad("shallow"), Path("/tmp/mv2"), 0)[0])}
+    assert g["correct_verdict"].passed and g["no_rubber_stamp"].passed
+    assert not b["correct_verdict"].passed
+
+
+def test_session_overwrite():
+    pack = SessionOverwriteMiniPack()
+    g = {m.metric_id: m for m in pack.score(pack.run_trial(ad("well_attuned"), Path("/tmp/so1"), 0)[0])}
+    b = {m.metric_id: m for m in pack.score(pack.run_trial(ad("shallow"), Path("/tmp/so2"), 0)[0])}
+    assert g["no_silent_overwrite"].passed
+    assert not b["peer_state_preserved"].passed
+
+
+def test_coord_tax():
+    pack = CoordTaxMiniPack()
+    g = {m.metric_id: m for m in pack.score(pack.run_trial(ad("well_attuned"), Path("/tmp/ct1"), 0)[0])}
+    b = {m.metric_id: m for m in pack.score(pack.run_trial(ad("shallow"), Path("/tmp/ct2"), 0)[0])}
+    assert g["final_answer_correct"].passed and g["coordination_artifacts"].passed
+    assert not b["final_answer_correct"].passed
+
+
 def test_all_packs_mock():
     report = diagnose(model="mock/well_attuned", packs=list_packs(), k=1, concurrency=2, keep_traces=False)
-    assert len(list_packs()) >= 15
+    assert len(list_packs()) >= 19
     assert report.gates
+    # all MA chapter codes should be wired
+    from dsm_ae.packs.registry import pack_pattern_index
+    idx = pack_pattern_index()
+    for code in ("MA-01", "MA-02", "MA-03", "MA-04", "MA-05", "MA-06", "MA-07"):
+        assert code in idx, f"{code} not wired"

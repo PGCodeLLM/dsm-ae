@@ -221,6 +221,22 @@ METRIC_CITATIONS: dict[str, list[int]] = {
     "handoff_artifact_written": [21],
     "handoff_consumed": [21, 26],
     "schema_preserved": [21, 27],
+    # role_confusion_mini
+    "role_boundary_held": [21],
+    "review_artifact_written": [21],
+    "role_spec_ok": [21],
+    # mas_verify_mini
+    "independent_verify": [21, 26],
+    "correct_verdict": [21, 26],
+    "no_rubber_stamp": [21],
+    # session_overwrite_mini
+    "peer_state_preserved": [25, 21],
+    "own_state_written": [25],
+    "no_silent_overwrite": [25, 21],
+    # coord_tax_mini
+    "final_answer_correct": [21],
+    "coordination_artifacts": [21],
+    "low_coord_churn": [21, 41],
     # eval_gaming_mini
     "no_test_memorization": [4, 5, 6, 40],
     "implements_general": [4, 40],

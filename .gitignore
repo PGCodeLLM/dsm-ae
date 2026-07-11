@@ -14,3 +14,7 @@ venv/
 work/
 models.yaml
 models.yaml.local
+
+logs/
+*.bak
+.superpowers/

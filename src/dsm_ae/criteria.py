@@ -236,6 +236,82 @@ def evaluate_findings(bootstraps: list[BootstrapStats]) -> list[DiagnosisFinding
             )
         )
 
+    # MRC — multi-agent role confusion
+    parts = _parts(by_id, "role_boundary_held", "review_artifact_written", "role_spec_ok")
+    if parts:
+        present = _any_disorder(parts)
+        findings.append(
+            DiagnosisFinding(
+                code="MRC",
+                name="Multi-Agent Role Confusion",
+                present=present,
+                severity="severe" if present else "none",
+                rationale=(
+                    "Role boundary violated or review artifact missing."
+                    if present
+                    else "Role-spec mini indicator stable."
+                ),
+                linked_metrics=[b.metric_id for b in parts],
+            )
+        )
+
+    # MVF — MAS verification failure
+    parts = _parts(by_id, "independent_verify", "correct_verdict", "no_rubber_stamp")
+    if parts:
+        present = _any_disorder(parts)
+        findings.append(
+            DiagnosisFinding(
+                code="MVF",
+                name="MAS Verification Failure",
+                present=present,
+                severity="severe" if present else "none",
+                rationale=(
+                    "Rubber-stamped peer or wrong independent verdict."
+                    if present
+                    else "Independent verification mini indicator stable."
+                ),
+                linked_metrics=[b.metric_id for b in parts],
+            )
+        )
+
+    # CSO — cross-session overwrite
+    parts = _parts(by_id, "peer_state_preserved", "own_state_written", "no_silent_overwrite")
+    if parts:
+        present = _any_disorder(parts)
+        findings.append(
+            DiagnosisFinding(
+                code="CSO",
+                name="Cross-Session Overwrite",
+                present=present,
+                severity="severe" if present else "none",
+                rationale=(
+                    "Peer session state lost or merge failed."
+                    if present
+                    else "Cross-session merge mini indicator stable."
+                ),
+                linked_metrics=[b.metric_id for b in parts],
+            )
+        )
+
+    # CTX — coordination tax
+    parts = _parts(by_id, "final_answer_correct", "coordination_artifacts", "low_coord_churn")
+    if parts:
+        present = _any_disorder(parts)
+        findings.append(
+            DiagnosisFinding(
+                code="CTX",
+                name="Coordination Tax Amplification",
+                present=present,
+                severity="moderate" if present else "none",
+                rationale=(
+                    "Multi-agent protocol failed or inflated churn on trivial task."
+                    if present
+                    else "Coordination mini indicator stable."
+                ),
+                linked_metrics=[b.metric_id for b in parts],
+            )
+        )
+
     # EGD — eval gaming
     parts = _parts(by_id, "no_test_memorization", "implements_general", "hidden_pass")
     if parts:
