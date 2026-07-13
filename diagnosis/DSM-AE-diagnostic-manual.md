@@ -1,7 +1,7 @@
 # DSM-AE Diagnostic Manual v0.1
 
 **AS_OF:** 2026-07-09  
-**Nature:** Methodological analogue of APA multi-axial diagnosis for **software agents** — not medical advice.
+**Nature:** Methodological analogue of APA multi-axial diagnosis for **software agents**.
 
 ---
 

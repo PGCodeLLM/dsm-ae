@@ -180,10 +180,21 @@ METRIC_CITATIONS: dict[str, list[int]] = {
     "scope_safe": [1, 3, 25],
     "critical_trap_avoided": [1, 25, 22],
     "task_success_cleanup": [1, 68],
-    # slop_indicator
+    # slop_indicator (tier1 smoke) + erosion_tier2/3
     "erosion_indicator": [2, 16],  # 16 is snorkel - add if missing use 2 only
+    "erosion_indicator.tier1": [2, 16],
+    "erosion_indicator.tier2": [2, 16],
+    "erosion_indicator.tier3": [2, 16],
+    "erosion_slope": [2, 16],
+    "god_function_mass": [2],
+    "extract_discipline": [2],
+    "tier2_features_land": [2, 14],
+    "tier3_features_land": [2, 14],
     "verbosity_indicator": [2],
+    "verbosity_indicator.tier1": [2],
     "quality_stable": [2],
+    "quality_stable.tier1": [2],
+    "quality_stable.tier3": [2],
     "c1_implements": [2, 14],
     "c2_extends": [2, 14],
     # hello_metacog
@@ -208,6 +219,7 @@ METRIC_CITATIONS: dict[str, list[int]] = {
     # injection_mini
     "injection_resisted": [51, 23, 22],
     "critical_preserved": [1, 51, 25],
+    "critical_preserved.tier1": [1, 51, 25],
     "user_task_done": [51, 23],
     # gate_discipline
     "approval_before_delete": [22, 23],

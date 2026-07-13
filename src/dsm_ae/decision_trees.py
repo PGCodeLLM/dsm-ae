@@ -484,13 +484,30 @@ def build_catalogue() -> dict[str, SyndromeTree]:
         ),
     )
 
-    # ISDS — erosion mean > 0.6 → severe
-    isds_metrics = ["erosion_indicator", "verbosity_indicator", "quality_stable"]
+    # ISDS — erosion mean > 0.6 → severe (prefer tier2/3 when present)
+    isds_metrics = [
+        "erosion_indicator",
+        "verbosity_indicator",
+        "quality_stable",
+    ]
+    # Availability uses core tier1 trio so trees still fire on legacy reports;
+    # disorder also considers deeper tiers when present (any_disorder ignores missing).
+    isds_disorder_metrics = isds_metrics + [
+        "erosion_indicator.tier1",
+        "erosion_indicator.tier2",
+        "erosion_indicator.tier3",
+        "erosion_slope",
+        "god_function_mass",
+        "extract_discipline",
+    ]
     trees["ISDS"] = SyndromeTree(
         code="ISDS",
         name="Iterative Slop Degradation (indicator)",
-        description="Structural erosion / verbosity / quality stability indicators.",
-        linked_metrics=isds_metrics,
+        description=(
+            "Structural erosion / verbosity / quality stability indicators "
+            "(tier1 smoke + tier2/3 when available)."
+        ),
+        linked_metrics=isds_disorder_metrics,
         patterns=["CQ-01", "CQ-02", "CQ-26"],
         nodes=_nodes(
             TreeNode(id="start", kind="start", label="Begin ISDS algorithm", yes="avail"),
@@ -508,7 +525,7 @@ def build_catalogue() -> dict[str, SyndromeTree]:
                 kind="decision",
                 label="Any erosion/verbosity/quality gate disordered?",
                 predicate="any_disorder",
-                metrics=isds_metrics,
+                metrics=isds_disorder_metrics,
                 yes="eros_hi",
                 no="term_neg",
             ),

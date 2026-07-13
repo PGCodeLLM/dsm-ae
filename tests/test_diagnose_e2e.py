@@ -48,3 +48,90 @@ def test_metrics_have_explanations():
         for m in b.per_trial:
             assert m.explanation
             assert m.metric_id
+
+
+def test_diagnose_resume_skips_checkpointed_trials(tmp_path):
+    """Second run with same work_dir reuses checkpoints and skips LLM work."""
+    work = tmp_path / "work"
+    r1 = diagnose(
+        model="mock/well_attuned",
+        packs=["hello_metacog"],
+        k=2,
+        work_dir=work,
+        resume=True,
+    )
+    assert r1.k_trials == 2
+    from dsm_ae.diagnose import CHECKPOINT_DIRNAME, count_trial_checkpoints
+
+    assert count_trial_checkpoints(work) == 2
+    ckpt_dir = work / CHECKPOINT_DIRNAME
+    mtimes = {p.name: p.stat().st_mtime for p in ckpt_dir.glob("*.json")}
+
+    # Corrupt nothing; second run should load both and not rewrite (or rewrite ok)
+    progress = []
+    r2 = diagnose(
+        model="mock/well_attuned",
+        packs=["hello_metacog"],
+        k=2,
+        work_dir=work,
+        resume=True,
+        on_progress=progress.append,
+    )
+    assert any(p.get("resumed") for p in progress if p.get("phase") == "running")
+    resumed_msgs = [
+        p for p in progress if p.get("phase") == "running" and p.get("resumed")
+    ]
+    assert len(resumed_msgs) == 2
+    assert any("Resumed 2/2" in n for n in r2.notes)
+    # Checkpoints still present
+    assert count_trial_checkpoints(work) == 2
+    # Gates still sensible
+    assert r2.gates
+
+
+def test_diagnose_resume_false_reruns(tmp_path):
+    work = tmp_path / "work"
+    diagnose(model="mock/well_attuned", packs=["hello_metacog"], k=1, work_dir=work)
+    progress = []
+    diagnose(
+        model="mock/well_attuned",
+        packs=["hello_metacog"],
+        k=1,
+        work_dir=work,
+        resume=False,
+        on_progress=progress.append,
+    )
+    running = [p for p in progress if p.get("phase") == "running"]
+    assert running
+    assert all(not p.get("resumed") for p in running)
+
+
+def test_trajectories_and_litellm_jsonl_persisted(tmp_path):
+    """Each trial writes traces, conversation, scores, and litellm.jsonl."""
+    work = tmp_path / "work"
+    diagnose(
+        model="mock/well_attuned",
+        packs=["hello_metacog"],
+        k=1,
+        work_dir=work,
+        resume=True,
+    )
+    from dsm_ae.trajectory_store import trajectory_dir
+
+    tdir = trajectory_dir(work, "hello_metacog", 0)
+    assert (tdir / "traces.json").is_file()
+    assert (tdir / "scores.json").is_file()
+    assert (tdir / "conversation.json").is_file()
+    assert (tdir / "litellm.jsonl").is_file()
+    assert (tdir / "meta.json").is_file()
+    lines = (tdir / "litellm.jsonl").read_text(encoding="utf-8").strip().splitlines()
+    assert len(lines) >= 1
+    import json
+    rec = json.loads(lines[0])
+    assert "request" in rec and "response" in rec
+    assert "messages" in rec["request"]
+    conv = json.loads((tdir / "conversation.json").read_text())
+    assert conv and conv[0].get("full_conversation")
+    # secrets never land in logs
+    blob = (tdir / "litellm.jsonl").read_text()
+    assert "api_key" not in blob or "***" in blob

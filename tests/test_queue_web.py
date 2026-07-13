@@ -38,6 +38,8 @@ def test_health_and_home(client: TestClient):
     assert b"eval queue" in r.content.lower()
     # Nav uses data-nav + client-side base detection (works local + funnel).
     assert b'data-nav="/matrix"' in r.content
+    assert b'data-nav="/reports-ui"' in r.content
+    assert b'data-nav="/treatment"' in r.content
     assert b"detectBase" in r.content or b"data-configured-base" in r.content
     assert b"location.reload" not in r.content
     assert b"pack-cb" in r.content  # multi-select packs
@@ -127,12 +129,72 @@ def test_token_required_for_mutate(tmp_path: Path):
 
 
 def test_matrix_and_static(client: TestClient):
+    # Comparison is an app shell (nav stays visible) embedding the static matrix.
     r = client.get("/matrix", follow_redirects=False)
-    assert r.status_code == 302
-    assert r.headers["location"].endswith("/reports/dsm-ae-matrix.html")
+    assert r.status_code == 200
+    body = r.content.lower()
+    assert b"comparison" in body
+    assert b'data-nav="/"' in r.content  # Queue link
+    assert b'data-nav="/treatment"' in r.content
+    assert b"iframe" in body
+    assert b"/reports/dsm-ae-matrix.html" in r.content
     r = client.get("/reports/dsm-ae-matrix.html")
     assert r.status_code == 200
     assert b"matrix" in r.content
+
+
+def test_treatment_page(client: TestClient, tmp_path: Path):
+    # Seed a treatment result under the fixture reports dir used by client.
+    reports = Path(client.app.state.reports_dir)
+    tdir = reports / "treatment"
+    tdir.mkdir(parents=True, exist_ok=True)
+    (tdir / "SUMMARY.md").write_text(
+        "# Trial summary\n\n| Arm | Status |\n|-----|--------|\n| baseline | ok |\n",
+        encoding="utf-8",
+    )
+    (tdir / "gpt-test-prompt_reminder.md").write_text("ok", encoding="utf-8")
+    (tdir / "gpt-test-prompt_reminder.json").write_text("{}", encoding="utf-8")
+    work = reports / "work" / "treatment_luna" / "prompt_reminder"
+    work.mkdir(parents=True, exist_ok=True)
+
+    r = client.get("/treatment")
+    assert r.status_code == 200
+    text = r.text
+    assert "Treatment" in text
+    assert 'data-nav="/"' in text
+    assert 'data-nav="/matrix"' in text
+    assert 'data-nav="/reports-ui"' in text
+    assert 'data-nav="/treatment"' in text
+    # Registered treatment ids
+    assert "prompt_reminder" in text
+    assert "skill_scaffold" in text
+    assert "expert_oversight" in text
+    assert "Trial summary" in text
+    # SUMMARY.md must render as HTML table, not a raw <pre> code dump
+    assert 'class="md-body"' in text
+    assert "<table>" in text
+    assert "<th>Arm</th>" in text
+    assert "<td>baseline</td>" in text
+    assert "<td>ok</td>" in text
+    assert "<pre>" not in text  # no monospaced markdown dump on this page
+    assert "run_treatment_luna_trial" in text
+    assert "dsm-ae diagnose" in text
+    # public_base prefix on server-rendered links
+    assert 'href="/dsm-ae/treatment"' in text or 'data-nav="/treatment"' in text
+
+
+def test_reports_ui_shell(client: TestClient):
+    r = client.get("/reports-ui")
+    assert r.status_code == 200
+    text = r.text
+    assert "Reports" in text
+    assert 'data-nav="/"' in text  # Queue
+    assert 'data-nav="/treatment"' in text
+    assert 'data-nav="/matrix"' in text
+    assert "/reports/" in text
+    # Still keep raw static tree available
+    r2 = client.get("/reports/dsm-ae-matrix.html")
+    assert r2.status_code == 200
 
 
 def test_packs_api(client: TestClient):
@@ -159,6 +221,15 @@ def test_public_base_prefix_routes_work(client: TestClient):
     assert 'data-configured-base="/dsm-ae"' in home
     # Server-side nav fallbacks keep links usable before JS runs.
     assert 'href="/dsm-ae/matrix"' in home
+    assert 'href="/dsm-ae/reports-ui"' in home
+    assert 'href="/dsm-ae/treatment"' in home
+    # Prefixed routes for new shells
+    r = client.get("/dsm-ae/treatment")
+    assert r.status_code == 200
+    assert "Treatment" in r.text
+    r = client.get("/dsm-ae/reports-ui")
+    assert r.status_code == 200
+    assert 'data-nav="/treatment"' in r.text
     # Static files still work at root paths
     r = client.get("/reports/dsm-ae-matrix.html")
     assert r.status_code == 200
@@ -237,4 +308,25 @@ def test_worker_writes_progress(tmp_path: Path):
         "done",
         "scoring",
         "running",
+    )
+
+
+def test_reports_and_matrix_send_no_cache_headers(client: TestClient, tmp_path: Path):
+    reports = tmp_path / "reports"
+    # client fixture already created reports; re-fetch via app routes on same client
+    r = client.get("/matrix")
+    assert r.status_code == 200
+    cc = r.headers.get("cache-control", "")
+    assert "no-store" in cc or "no-cache" in cc
+    r = client.get("/reports-ui")
+    assert "no-store" in r.headers.get("cache-control", "") or "no-cache" in r.headers.get(
+        "cache-control", ""
+    )
+    r = client.get("/treatment")
+    assert "no-store" in r.headers.get("cache-control", "")
+    # static matrix file under /reports
+    r = client.get("/reports/dsm-ae-matrix.html")
+    assert r.status_code == 200
+    assert "no-store" in r.headers.get("cache-control", "") or "no-cache" in r.headers.get(
+        "cache-control", ""
     )

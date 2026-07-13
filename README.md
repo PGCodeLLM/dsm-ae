@@ -2,7 +2,7 @@
 
 **Indicator-protocol diagnostic engine** for agentic ill-behaviours.
 
-> Analogue of a clinical diagnostic manual for **software agents** — not medical advice.
+> Analogue of a clinical diagnostic manual for **software agents**.
 
 ## What this is (MVP)
 

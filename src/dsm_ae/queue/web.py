@@ -33,7 +33,12 @@ from dsm_ae.queue.progress import (
 )
 from dsm_ae.queue.store import JobStore
 from dsm_ae.queue.worker import default_worker_id, run_loop
-from dsm_ae.queue.web_html import render_queue_page
+from dsm_ae.queue.web_html import (
+    render_comparison_page,
+    render_queue_page,
+    render_reports_page,
+    render_treatment_page,
+)
 
 
 class EnqueueBody(BaseModel):
@@ -61,6 +66,18 @@ class ConnectionTestBody(BaseModel):
     api_key: str | None = None
     timeout: float | None = 30.0
     num_retries: int | None = 0
+
+
+# Matrix/report HTML changes often; never let browsers keep a stale Comparison view.
+_NO_CACHE_HEADERS = {
+    "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+    "Pragma": "no-cache",
+    "Expires": "0",
+}
+
+
+def _html(content: str, *, status_code: int = 200) -> HTMLResponse:
+    return HTMLResponse(content, status_code=status_code, headers=dict(_NO_CACHE_HEADERS))
 
 
 def _job_dict(job: EvalJob) -> dict[str, Any]:
@@ -170,6 +187,24 @@ def create_app(
             if path == base or path.startswith(base + "/"):
                 request.scope["path"] = path[len(base) :] or "/"
             return await call_next(request)
+
+    @app.middleware("http")
+    async def _no_cache_ui_and_reports(request: Request, call_next):  # type: ignore[no-untyped-def]
+        """Disable caching for UI shells + /reports static HTML/JSON artifacts."""
+        response = await call_next(request)
+        path = request.scope.get("path", "") or ""
+        no_cache = (
+            path == "/"
+            or path.startswith("/queue")
+            or path.startswith("/matrix")
+            or path.startswith("/reports")
+            or path.startswith("/treatment")
+            or path.startswith("/api/jobs")
+        )
+        if no_cache:
+            for k, v in _NO_CACHE_HEADERS.items():
+                response.headers[k] = v
+        return response
 
     def href(path: str) -> str:
         if not path.startswith("/"):
@@ -391,6 +426,7 @@ def create_app(
             timeoutish = any(
                 k in lower for k in ("timeout", "timed out", "deadline", "read timed")
             )
+            unknown_provider = "unknown provider" in lower
             if timeoutish:
                 hint = (
                     " The model host did not respond in time (down, overloaded, or "
@@ -398,9 +434,16 @@ def create_app(
                     "the DSM-AE queue token."
                 )
                 code = "endpoint_timeout"
+            elif unknown_provider:
+                hint = (
+                    " Gateway rejected the model id. For OpenAI-compatible proxies, "
+                    "use the bare model name (e.g. qwen3.6-plus) plus API base URL — "
+                    "not hosted_vllm/… unless that gateway expects that prefix."
+                )
+                code = "endpoint_model_not_routed"
             elif authish:
                 hint = (
-                    " Check model API base URL and API key (LiteLLM credentials) — "
+                    " Check model API base URL and API key — "
                     "this is not the DSM-AE queue token."
                 )
                 code = "endpoint_auth_or_network_error"
@@ -460,11 +503,11 @@ def create_app(
 
     @app.get("/", response_class=HTMLResponse)
     def home() -> HTMLResponse:
-        return HTMLResponse(render_queue_page(store, href, app.state.token is not None, title="DSM-AE"))
+        return _html(render_queue_page(store, href, app.state.token is not None, title="DSM-AE"))
 
     @app.get("/queue", response_class=HTMLResponse)
     def queue_page() -> HTMLResponse:
-        return HTMLResponse(
+        return _html(
             render_queue_page(store, href, app.state.token is not None, title="Queue")
         )
 
@@ -535,16 +578,24 @@ def create_app(
         )
         return RedirectResponse(href("/queue"), status_code=303)
 
-    @app.get("/matrix")
-    def matrix_redirect() -> RedirectResponse:
-        # Prefer matrix file; fall back to reports listing
-        matrix = reports_dir / "dsm-ae-matrix.html"
-        if matrix.is_file():
-            return RedirectResponse(href("/reports/dsm-ae-matrix.html"), status_code=302)
-        index = reports_dir / "index.html"
-        if index.is_file():
-            return RedirectResponse(href("/reports/index.html"), status_code=302)
-        raise HTTPException(404, "No matrix HTML yet — run a successful job first")
+    @app.get("/matrix", response_class=HTMLResponse)
+    def matrix_page() -> HTMLResponse:
+        # Shell with shared nav + iframe to static matrix (keeps chrome visible).
+        return _html(
+            render_comparison_page(href, reports_dir, title="Comparison")
+        )
+
+    @app.get("/reports-ui", response_class=HTMLResponse)
+    def reports_ui() -> HTMLResponse:
+        # Primary Reports nav target — app chrome + directory index.
+        # Raw files remain at /reports/... via StaticFiles.
+        return _html(render_reports_page(href, reports_dir, title="Reports"))
+
+    @app.get("/treatment", response_class=HTMLResponse)
+    def treatment_page() -> HTMLResponse:
+        return _html(
+            render_treatment_page(href, reports_dir, title="Treatment")
+        )
 
     app.mount(
         "/reports",

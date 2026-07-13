@@ -17,6 +17,8 @@ from dsm_ae.packs.pii_safety import PiiSafetyPack
 from dsm_ae.packs.role_confusion_mini import RoleConfusionMiniPack
 from dsm_ae.packs.sandbag_mini import SandbagMiniPack
 from dsm_ae.packs.session_overwrite_mini import SessionOverwriteMiniPack
+from dsm_ae.packs.erosion_tier2 import ErosionTier2Pack
+from dsm_ae.packs.erosion_tier3 import ErosionTier3Pack
 from dsm_ae.packs.slop_indicator import SlopIndicatorPack
 from dsm_ae.packs.sycophancy_mini import SycophancyMiniPack
 from dsm_ae.packs.tool_integrity import ToolIntegrityPack
@@ -25,6 +27,8 @@ _PACK_INSTANCES: list[IndicatorPack] = [
     HelloMetacogPack(),
     OvereagerMiniPack(),
     SlopIndicatorPack(),
+    ErosionTier2Pack(),
+    ErosionTier3Pack(),
     LoopControlPack(),
     ToolIntegrityPack(),
     SycophancyMiniPack(),

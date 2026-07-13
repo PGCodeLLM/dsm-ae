@@ -1,0 +1,55 @@
+{
+  "probe": "offline_bmad_prose_calibration",
+  "note": "Synthetic fixtures from session UI copy; not live gpt-5.6-sol API",
+  "verbose_ui": {
+    "n_words": 131,
+    "n_sentences": 12,
+    "avg_sentence_words": 10.92,
+    "editorial_issue_count": 4,
+    "adversarial_findings_count": 9,
+    "filler_density": 0.0382,
+    "jargon_hits": [
+      "UI auth",
+      "mock/",
+      "JavaScript enabled"
+    ],
+    "deletable_sentences": [
+      "Progress updates live while jobs run",
+      "Your form fields stay as you left them",
+      "API keys stay on the server and are never shown in job lists",
+      "Expand below to view the decision tree",
+      "Open this page with JavaScript enabled to view the decision tree",
+      "How each model was scored\nShow step-by-step evidence"
+    ],
+    "issues": [
+      "parenthetical_essays=2",
+      "jargon=['UI auth', 'mock/', 'JavaScript enabled']",
+      "filler=['step-by-step', 'below to view', 'evidence list', 'Progress updates live', 'never shown']",
+      "long_sentence:Queue token (UI auth \u2014 not the model API key)\nLeave base URL..."
+    ],
+    "passed_editorial": false,
+    "passed_adversarial": false,
+    "passed_filler": false
+  },
+  "tight_ui": {
+    "n_words": 28,
+    "n_sentences": 3,
+    "avg_sentence_words": 9.33,
+    "editorial_issue_count": 0,
+    "adversarial_findings_count": 0,
+    "filler_density": 0.0,
+    "jargon_hits": [],
+    "deletable_sentences": [],
+    "issues": [],
+    "passed_editorial": true,
+    "passed_adversarial": true,
+    "passed_filler": true
+  },
+  "cleanup_slope_verbose_to_tight": 1.0,
+  "thresholds_proposed": {
+    "editorial_issue_count_ui_max": 2,
+    "adversarial_findings_ui_max": 2,
+    "filler_density_max": 0.02,
+    "avg_sentence_words_ui_max": 14
+  }
+}

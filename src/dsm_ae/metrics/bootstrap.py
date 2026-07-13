@@ -18,6 +18,7 @@ from dsm_ae.models import (
     GateStatus,
     MetricResult,
 )
+from dsm_ae.packs.smoke_metrics import SMOKE_BADGE, is_smoke_metric
 
 
 def classify_status(
@@ -61,9 +62,11 @@ def bootstrap_metric(
 
     # human summary
     explanations = [m.explanation for m in per_trial[:3]]
+    smoke_tag = f" [{SMOKE_BADGE}]" if is_smoke_metric(metric_id) else ""
     summary = (
         f"n={n} mean={mean:.3f} std={std:.3f} pass_rate={pass_rate:.3f} → {status.value}"
         + (f" (DISORDER)" if disorder else " (attuned)")
+        + smoke_tag
         + (f". e.g. {explanations[0]}" if explanations else "")
     )
 

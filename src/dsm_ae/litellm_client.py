@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 import os
 import re
+import threading
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable
@@ -16,6 +18,19 @@ class CompletionResult:
     tool_calls: list[dict[str, Any]] = field(default_factory=list)
     usage: dict[str, float] = field(default_factory=dict)
     raw: Any = None
+
+
+_call_log_tls = threading.local()
+
+
+def set_thread_call_log(path: Path | str | None) -> None:
+    """Route completion call logs for this thread to ``path`` (JSONL)."""
+    _call_log_tls.path = Path(path) if path else None
+
+
+def get_thread_call_log() -> Path | None:
+    p = getattr(_call_log_tls, "path", None)
+    return Path(p) if p else None
 
 
 # Tool schema shared by raw_tool_loop
@@ -116,6 +131,10 @@ RAW_TOOLS = [
 class ModelClient:
     """Abstract completion interface."""
 
+    def set_call_log(self, path: Path | str | None) -> None:
+        """Persist raw completion request/response JSONL for this thread."""
+        set_thread_call_log(path)
+
     def complete(
         self,
         messages: list[dict[str, Any]],
@@ -124,6 +143,77 @@ class ModelClient:
         max_tokens: int = 2048,
     ) -> CompletionResult:
         raise NotImplementedError
+
+    def _log_completion(
+        self,
+        *,
+        request: dict[str, Any],
+        response: Any = None,
+        error: str | None = None,
+        elapsed_ms: float | None = None,
+    ) -> None:
+        path = get_thread_call_log()
+        if path is None:
+            return
+        try:
+            from dsm_ae.trajectory_store import append_litellm_call
+
+            append_litellm_call(
+                path,
+                request=request,
+                response=response,
+                error=error,
+                elapsed_ms=elapsed_ms,
+                meta={"client": type(self).__name__},
+            )
+        except Exception:
+            # Logging must never break inference.
+            pass
+
+
+# Providers that mean "talk OpenAI-compatible HTTP" when api_base is set.
+_OPENAI_COMPAT_ALIASES = (
+    "hosted_vllm/",
+    "vllm/",
+    "openai/",
+    "openai.",
+)
+
+
+def _normalize_litellm_model(model: str, *, api_base: str | None) -> str:
+    """Map UI/model-id strings to a LiteLLM model id for completion.
+
+    With a custom ``api_base`` (proxy / OpenAI-compatible server), always prefer
+    ``openai/<name>`` so LiteLLM uses the OpenAI client against that base.
+    Strips mistaken ``hosted_vllm/`` / ``vllm/`` prefixes that only apply to
+    LiteLLM's built-in hosted provider, not a user gateway.
+    """
+    model = (model or "").strip()
+    if not model:
+        return model
+    if not api_base:
+        # No custom base: leave provider prefixes alone (true hosted_vllm, etc.).
+        return model
+
+    lower = model.lower()
+    for prefix in ("hosted_vllm/", "vllm/"):
+        if lower.startswith(prefix):
+            model = model.split("/", 1)[1]
+            break
+
+    # Already an OpenAI/Azure-style route
+    if model.startswith(("openai/", "azure/", "openai.")):
+        return model
+    # Bare name → openai-compatible route to api_base
+    if "/" not in model:
+        return f"openai/{model}"
+    # Other provider/model strings with api_base: still force openai path using
+    # the leaf name if it looks like a gateway id (contains no second slash).
+    if model.count("/") == 1 and not model.startswith(("openai/", "azure/")):
+        # e.g. anthropic/claude-… against a multi-provider CPA gateway that
+        # expects the full id — keep as-is only if not a vllm alias (handled).
+        return model
+    return model
 
 
 class LiteLLMClient(ModelClient):
@@ -159,16 +249,11 @@ class LiteLLMClient(ModelClient):
         temperature: float = 0.0,
         max_tokens: int = 2048,
     ) -> CompletionResult:
-        # Custom OpenAI-compatible proxies need an openai/ prefix for routing
-        model = self.model
-        if self.api_base and "/" not in model:
-            model = f"openai/{model}"
-        elif self.api_base and not model.startswith(
-            ("openai/", "azure/", "hosted_vllm/", "openai.")
-        ):
-            # keep explicit provider if already set; else force openai proxy route
-            if model.count("/") == 0:
-                model = f"openai/{model}"
+        # Custom OpenAI-compatible proxies need openai/ routing.
+        # hosted_vllm/ is a LiteLLM provider for *their* hosted path — with a
+        # user-supplied api_base (CPA / OpenAI-compat gateway) it mis-routes and
+        # often returns "unknown provider for model …". Rewrite to openai/.
+        model = _normalize_litellm_model(self.model, api_base=self.api_base)
 
         kwargs: dict[str, Any] = {
             "model": model,
@@ -188,7 +273,19 @@ class LiteLLMClient(ModelClient):
         if tools:
             kwargs["tools"] = tools
             kwargs["tool_choice"] = "auto"
-        resp = self._litellm.completion(**kwargs)
+        # Log request without secrets (api_key redacted in append_litellm_call).
+        log_req = {k: v for k, v in kwargs.items()}
+        t0 = time.perf_counter()
+        try:
+            resp = self._litellm.completion(**kwargs)
+        except Exception as e:
+            self._log_completion(
+                request=log_req,
+                error=f"{type(e).__name__}: {e}",
+                elapsed_ms=(time.perf_counter() - t0) * 1000,
+            )
+            raise
+        elapsed_ms = (time.perf_counter() - t0) * 1000
         msg = resp.choices[0].message
         content = msg.content or ""
         tcs: list[dict[str, Any]] = []
@@ -215,6 +312,11 @@ class LiteLLMClient(ModelClient):
                     getattr(resp.usage, "completion_tokens", 0) or 0
                 ),
             }
+        self._log_completion(
+            request=log_req,
+            response=resp,
+            elapsed_ms=elapsed_ms,
+        )
         return CompletionResult(content=content, tool_calls=tcs, usage=usage, raw=resp)
 
 
@@ -246,6 +348,35 @@ class MockClient(ModelClient):
         max_tokens: int = 2048,
     ) -> CompletionResult:
         self._call_i += 1
+        t0 = time.perf_counter()
+        log_req = {
+            "model": f"mock/{self.persona}",
+            "messages": messages,
+            "tools": tools,
+            "temperature": temperature,
+            "max_tokens": max_tokens,
+            "call_i": self._call_i,
+            "trial_hint": self.trial_hint,
+        }
+        result = self._complete_impl(messages, tools, temperature, max_tokens)
+        self._log_completion(
+            request=log_req,
+            response={
+                "content": result.content,
+                "tool_calls": result.tool_calls,
+                "usage": result.usage,
+            },
+            elapsed_ms=(time.perf_counter() - t0) * 1000,
+        )
+        return result
+
+    def _complete_impl(
+        self,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]] | None = None,
+        temperature: float = 0.0,
+        max_tokens: int = 2048,
+    ) -> CompletionResult:
         user_blob = "\n".join(m.get("content", "") or "" for m in messages if m.get("role") == "user")
         sys_blob = "\n".join(m.get("content", "") or "" for m in messages if m.get("role") == "system")
         blob = sys_blob + "\n" + user_blob
@@ -263,6 +394,14 @@ class MockClient(ModelClient):
         # --- Overeager cleanup ---
         if "CLEANUP_TASK" in blob or "clean up" in blob.lower() and "trash" in blob.lower():
             return self._overeager(blob, n_tools_done, tool_results)
+
+        # --- Erosion tier2 (hot-seed structural) ---
+        if "EROSION_TIER2" in blob:
+            return self._erosion_tier2(blob, n_tools_done, tool_results)
+
+        # --- Erosion tier3 (multi-ckpt slope) ---
+        if "EROSION_TIER3" in blob:
+            return self._erosion_tier3(blob, n_tools_done, tool_results)
 
         # --- Slop indicator (extend code) ---
         if "SLOP_CHECKPOINT" in blob or "extend the program" in blob.lower():
@@ -464,6 +603,90 @@ class MockClient(ModelClient):
                     "id": "d0",
                     "name": "done",
                     "arguments": {"message": f"Updated main.py for checkpoint {ckpt}."},
+                }
+            ],
+        )
+
+    def _erosion_tier2(self, blob: str, n_tools: int, tool_results: list[str]) -> CompletionResult:
+        """Hot-seed extend: sloppy patches god-fn; well_attuned extracts helpers."""
+        from dsm_ae.packs.erosion_tier2 import (
+            synthetic_extracted_code,
+            synthetic_high_cc_code,
+        )
+
+        persona = self.persona
+        if persona == "unstable":
+            persona = "well_attuned" if self.trial_hint % 2 == 0 else "sloppy"
+
+        if n_tools == 0:
+            return CompletionResult(
+                content="",
+                tool_calls=[{"id": "r0", "name": "read_file", "arguments": {"path": "main.py"}}],
+            )
+        body = synthetic_high_cc_code() if persona == "sloppy" else synthetic_extracted_code()
+        if n_tools == 1:
+            return CompletionResult(
+                content="",
+                tool_calls=[
+                    {
+                        "id": "w0",
+                        "name": "write_file",
+                        "arguments": {"path": "main.py", "content": body},
+                    }
+                ],
+            )
+        return CompletionResult(
+            content="",
+            tool_calls=[
+                {
+                    "id": "d0",
+                    "name": "done",
+                    "arguments": {"message": "Updated main.py for erosion tier2."},
+                }
+            ],
+        )
+
+    def _erosion_tier3(self, blob: str, n_tools: int, tool_results: list[str]) -> CompletionResult:
+        """Multi-ckpt: sloppy grows god-fn with ckpt; well_attuned stays modular."""
+        persona = self.persona
+        if persona == "unstable":
+            persona = "well_attuned" if self.trial_hint % 2 == 0 else "sloppy"
+
+        ckpt = 1
+        m = re.search(r"CHECKPOINT\s*(\d+)", blob, re.I)
+        if m:
+            ckpt = int(m.group(1))
+
+        if n_tools == 0:
+            return CompletionResult(
+                content="",
+                tool_calls=[{"id": "r0", "name": "read_file", "arguments": {"path": "main.py"}}],
+            )
+
+        if persona == "sloppy":
+            # Rising erosion: increasingly hot single function
+            body = _sloppy_main(max(ckpt, 2) + 1)
+        else:
+            body = _clean_main_tier3(ckpt)
+
+        if n_tools == 1:
+            return CompletionResult(
+                content="",
+                tool_calls=[
+                    {
+                        "id": "w0",
+                        "name": "write_file",
+                        "arguments": {"path": "main.py", "content": body},
+                    }
+                ],
+            )
+        return CompletionResult(
+            content="",
+            tool_calls=[
+                {
+                    "id": "d0",
+                    "name": "done",
+                    "arguments": {"message": f"Updated main.py for tier3 checkpoint {ckpt}."},
                 }
             ],
         )
@@ -837,6 +1060,47 @@ class MockClient(ModelClient):
         )
 
 
+def _clean_main_tier3(ckpt: int) -> str:
+    """Modular multi-feature main for erosion_tier3 mock (stays low CC)."""
+    base = _clean_main(min(ckpt, 2))
+    extras = []
+    if ckpt >= 3:
+        extras.append(
+            "\n# exclude / max-bytes helpers\n"
+            "def should_exclude(path: str, globs: list[str]) -> bool:\n"
+            "    return any(g in path for g in (globs or []))\n"
+            "\n"
+            "def too_big(path: Path, max_bytes: int) -> bool:\n"
+            "    try:\n"
+            "        return max_bytes > 0 and path.stat().st_size > max_bytes\n"
+            "    except OSError:\n"
+            "        return True\n"
+        )
+    if ckpt >= 4:
+        extras.append(
+            "\ndef line_hits(path: Path, pattern: str) -> list[tuple[int, str]]:\n"
+            "    import re\n"
+            "    rx = re.compile(pattern)\n"
+            "    out = []\n"
+            "    try:\n"
+            "        for i, line in enumerate(path.read_text(errors='ignore').splitlines()):\n"
+            "            if rx.search(line):\n"
+            "                out.append((i, line))\n"
+            "    except OSError:\n"
+            "        pass\n"
+            "    return out\n"
+        )
+    # ensure feature keywords present for gates
+    tags = ""
+    if ckpt >= 2:
+        tags += "\n# langs binary skip\n"
+    if ckpt >= 3:
+        tags += "# exclude-globs max-bytes symlink policy\n"
+    if ckpt >= 4:
+        tags += "# patterns context line-mode\n"
+    return base + "".join(extras) + tags
+
+
 def _clean_main(ckpt: int) -> str:
     lines = [
         '"""Search CLI — modular."""',
@@ -1001,15 +1265,21 @@ def make_client(
     if models_yaml:
         entry = resolve_from_models_yaml(models_yaml, model if model else None)
         params = dict(entry.get("litellm_params") or {})
-        # Keep caller's model id; yaml supplies credentials/endpoint
+        # Keep caller's model id; yaml fills *missing* credentials/endpoint only.
+        # Explicit api_base / api_key from the UI or CLI always win — otherwise a
+        # yaml fallback (first model_list entry) silently overrides the form.
         yaml_model = params.pop("model", None)
         resolved_model = model or yaml_model or resolved_model
-        resolved_base = params.pop("api_base", None) or resolved_base
-        resolved_key = params.pop("api_key", None) or resolved_key
+        yaml_base = params.pop("api_base", None)
+        yaml_key = params.pop("api_key", None)
+        resolved_base = resolved_base or yaml_base
+        resolved_key = resolved_key or yaml_key
         # strip non-completion knobs
         params.pop("rpm", None)
         params.pop("tpm", None)
-        resolved_extra.update(params)
+        # extras from yaml only fill gaps (do not clobber explicit timeout etc.)
+        for k, v in params.items():
+            resolved_extra.setdefault(k, v)
 
     return LiteLLMClient(
         model=resolved_model,

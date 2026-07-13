@@ -123,12 +123,18 @@ def diagnose_cmd(
     rpm: Optional[float] = typer.Option(
         None, "--rpm", help="Max job starts per minute (default: models.yaml rpm if any)"
     ),
+    treatment: Optional[str] = typer.Option(
+        None,
+        "--treatment",
+        "-t",
+        help="Treatment id (prompt_reminder | skill_scaffold | expert_oversight)",
+    ),
 ) -> None:
     """Run indicator protocols k times; emit outcome-gate matrix + findings."""
     pack_list = [x.strip() for x in packs.split(",")] if packs else None
     console.print(
         f"[bold]DSM-AE diagnose[/bold] model={model} k={k} "
-        f"concurrency={concurrency} yaml={models_yaml}"
+        f"concurrency={concurrency} yaml={models_yaml} treatment={treatment or 'none'}"
     )
     report = diagnose(
         model=model,
@@ -145,8 +151,19 @@ def diagnose_cmd(
         api_key=api_key,
         concurrency=concurrency,
         rpm=rpm,
+        treatment=treatment,
     )
     _print_report(report, out, json_out)
+
+
+@app.command("list-treatments")
+def list_treatments_cmd() -> None:
+    """List registered treatment interventions."""
+    from dsm_ae.treatment import get_treatment, list_treatments
+
+    for tid in list_treatments():
+        t = get_treatment(tid)
+        console.print(f"- [bold]{tid}[/bold]: {t.name} — {t.description}")
 
 
 @app.command("diagnose-batch")

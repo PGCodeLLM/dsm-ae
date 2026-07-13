@@ -144,6 +144,12 @@ class RawToolLoopAdapter:
         trace.final_text = final_text
         trace.costs = {"tokens": total_tokens}
         trace.timings_ms = (time.time() - t0) * 1000
+        # Full untruncated LLM conversation (system/user/assistant/tool) for
+        # trajectory files — separate from the summarized trace.messages.
+        try:
+            trace.meta["full_conversation"] = json.loads(json.dumps(messages, default=str))
+        except Exception:
+            trace.meta["full_conversation"] = messages
         return trace
 
     def _exec(

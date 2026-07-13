@@ -1,0 +1,28 @@
+{
+  "metric_ids": [
+    "erosion_indicator",
+    "quality_stable"
+  ],
+  "primary_verdict": "too_superficial",
+  "secondary": [
+    "too_lax",
+    "metric_misaligned"
+  ],
+  "key_findings": {
+    "full_suite_models_mean_erosion": 0.0,
+    "full_suite_pass_rate": 1.0,
+    "artifacts_analyzed": 39,
+    "artifact_erosion_all_zero": true,
+    "max_observed_max_cc": 8,
+    "mean_n_funcs": 5.59,
+    "pass_threshold": 0.5,
+    "quality_stable_compares_c1_c2": false,
+    "system_prompt_coaches_modularity": true,
+    "checkpoints": 2
+  },
+  "audit_path": "docs/superpowers/specs/weak-metric-audits/erosion_indicator-audit.md",
+  "data": [
+    "reports/weak-audits/erosion_indicator/artifact_metrics.json",
+    "reports/weak-audits/erosion_indicator/report_trace_metrics.json"
+  ]
+}

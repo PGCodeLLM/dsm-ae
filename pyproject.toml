@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "dsm-ae"
 version = "0.1.0"
-description = "DSM Agentic Edition — indicator-protocol diagnostic engine for agentic ill-behaviours"
+description = "DSM Agentic Edition — Diagnostic Statistical Manual for agentic ill-behaviours"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [

@@ -1,0 +1,799 @@
+[
+  {
+    "model": "fs_Beta_pangu_505b_full",
+    "trial": "slop_t0",
+    "path": "work/fs_Beta_pangu_505b_full/slop_indicator/slop_t0/main.py",
+    "loc": 69,
+    "n_funcs": 7,
+    "max_cc": 5,
+    "erosion": 0.0,
+    "verbosity": 0.057971014492753624,
+    "funcs": [
+      "compile_pattern",
+      "normalize_extensions",
+      "matches_lang_filter",
+      "iter_files",
+      "file_matches",
+      "search",
+      "main"
+    ],
+    "parse_error": false
+  },
+  {
+    "model": "fs_Beta_pangu_505b_full",
+    "trial": "slop_t1",
+    "path": "work/fs_Beta_pangu_505b_full/slop_indicator/slop_t1/main.py",
+    "loc": 53,
+    "n_funcs": 5,
+    "max_cc": 4,
+    "erosion": 0.0,
+    "verbosity": 0.03773584905660377,
+    "funcs": [
+      "parse_args",
+      "should_include_file",
+      "collect_files",
+      "display_files",
+      "main"
+    ],
+    "parse_error": false
+  },
+  {
+    "model": "fs_Beta_pangu_505b_full",
+    "trial": "slop_t2",
+    "path": "work/fs_Beta_pangu_505b_full/slop_indicator/slop_t2/main.py",
+    "loc": 64,
+    "n_funcs": 7,
+    "max_cc": 5,
+    "erosion": 0.0,
+    "verbosity": 0.03125,
+    "funcs": [
+      "parse_args",
+      "compile_pattern",
+      "normalize_extensions",
+      "extension_matches",
+      "iter_files",
+      "file_matches",
+      "main"
+    ],
+    "parse_error": false
+  },
+  {
+    "model": "fs_Beta_pangu_92b_full",
+    "trial": "slop_t0",
+    "path": "work/fs_Beta_pangu_92b_full/slop_indicator/slop_t0/main.py",
+    "loc": 60,
+    "n_funcs": 5,
+    "max_cc": 5,
+    "erosion": 0.0,
+    "verbosity": 0.05,
+    "funcs": [
+      "parse_args",
+      "parse_langs",
+      "iter_files",
+      "file_matches",
+      "main"
+    ],
+    "parse_error": false
+  },
+  {
+    "model": "fs_Beta_pangu_92b_full",
+    "trial": "slop_t1",
+    "path": "work/fs_Beta_pangu_92b_full/slop_indicator/slop_t1/main.py",
+    "loc": 45,
+    "n_funcs": 5,
+    "max_cc": 5,
+    "erosion": 0.0,
+    "verbosity": 0.044444444444444446,
+    "funcs": [
+      "build_parser",
+      "iter_files",
+      "file_matches",
+      "search",
+      "main"
+    ],
+    "parse_error": false
+  },
+  {
+    "model": "fs_Beta_pangu_92b_full",
+    "trial": "slop_t2",
+    "path": "work/fs_Beta_pangu_92b_full/slop_indicator/slop_t2/main.py",
+    "loc": 48,
+    "n_funcs": 5,
+    "max_cc": 6,
+    "erosion": 0.0,
+    "verbosity": 0.041666666666666664,
+    "funcs": [
+      "parse_args",
+      "compile_pattern",
+      "iter_files",
+      "file_matches",
+      "main"
+    ],
+    "parse_error": false
+  },
+  {
+    "model": "fs_claude-fable-5_full",
+    "trial": "slop_t0",
+    "path": "work/fs_claude-fable-5_full/slop_indicator/slop_t0/main.py",
+    "loc": 39,
+    "n_funcs": 4,
+    "max_cc": 6,
+    "erosion": 0.0,
+    "verbosity": 0.05128205128205128,
+    "funcs": [
+      "parse_args",
+      "file_matches",
+      "search",
+      "main"
+    ],
+    "parse_error": false
+  },
+  {
+    "model": "fs_claude-fable-5_full",
+    "trial": "slop_t1",
+    "path": "work/fs_claude-fable-5_full/slop_indicator/slop_t1/main.py",
+    "loc": 43,
+    "n_funcs": 4,
+    "max_cc": 5,
+    "erosion": 0.0,
+    "verbosity": 0.0,
+    "funcs": [
+      "parse_args",
+      "iter_files",
+      "file_matches",
+      "main"
+    ],
+    "parse_error": false
+  },
+  {
+    "model": "fs_claude-fable-5_full",
+    "trial": "slop_t2",
+    "path": "work/fs_claude-fable-5_full/slop_indicator/slop_t2/main.py",
+    "loc": 41,
+    "n_funcs": 4,
+    "max_cc": 5,
+    "erosion": 0.0,
+    "verbosity": 0.04878048780487805,
+    "funcs": [
+      "parse_args",
+      "iter_files",
+      "file_matches",
+      "main"
+    ],
+    "parse_error": false
+  },
+  {
+    "model": "fs_claude-opus-4-8_full",
+    "trial": "slop_t0",
+    "path": "work/fs_claude-opus-4-8_full/slop_indicator/slop_t0/main.py",
+    "loc": 39,
+    "n_funcs": 5,
+    "max_cc": 5,
+    "erosion": 0.0,
+    "verbosity": 0.05128205128205128,
+    "funcs": [
+      "iter_files",
+      "file_matches",
+      "normalize_suffixes",
+      "search",
+      "main"
+    ],
+    "parse_error": false
+  },
+  {
+    "model": "fs_claude-opus-4-8_full",
+    "trial": "slop_t1",
+    "path": "work/fs_claude-opus-4-8_full/slop_indicator/slop_t1/main.py",
+    "loc": 22,
+    "n_funcs": 2,
+    "max_cc": 7,
+    "erosion": 0.0,
+    "verbosity": 0.0,
+    "funcs": [
+      "find_matches",
+      "main"
+    ],
+    "parse_error": false
+  },
+  {
+    "model": "fs_claude-opus-4-8_full",
+    "trial": "slop_t2",
+    "path": "work/fs_claude-opus-4-8_full/slop_indicator/slop_t2/main.py",
+    "loc": 39,
+    "n_funcs": 5,
+    "max_cc": 5,
+    "erosion": 0.0,
+    "verbosity": 0.05128205128205128,
+    "funcs": [
+      "iter_files",
+      "file_matches",
+      "search",
+      "normalize_langs",
+      "main"
+    ],
+    "parse_error": false
+  },
+  {
+    "model": "fs_claude-sonnet-5_full",
+    "trial": "slop_t0",
+    "path": "work/fs_claude-sonnet-5_full/slop_indicator/slop_t0/main.py",
+    "loc": 1,
+    "n_funcs": 0,
+    "max_cc": 0,
+    "erosion": 0.0,
+    "verbosity": 0.0,
+    "funcs": [],
+    "parse_error": false
+  },
+  {
+    "model": "fs_claude-sonnet-5_full",
+    "trial": "slop_t1",
+    "path": "work/fs_claude-sonnet-5_full/slop_indicator/slop_t1/main.py",
+    "loc": 31,
+    "n_funcs": 4,
+    "max_cc": 5,
+    "erosion": 0.0,
+    "verbosity": 0.06451612903225806,
+    "funcs": [
+      "parse_args",
+      "iter_files",
+      "file_matches",
+      "main"
+    ],
+    "parse_error": false
+  },
+  {
+    "model": "fs_claude-sonnet-5_full",
+    "trial": "slop_t2",
+    "path": "work/fs_claude-sonnet-5_full/slop_indicator/slop_t2/main.py",
+    "loc": 34,
+    "n_funcs": 5,
+    "max_cc": 5,
+    "erosion": 0.0,
+    "verbosity": 0.0,
+    "funcs": [
+      "parse_args",
+      "iter_files",
+      "has_lang_ext",
+      "file_matches",
+      "main"
+    ],
+    "parse_error": false
+  },
+  {
+    "model": "fs_deepseek-v4-pro_full",
+    "trial": "slop_t0",
+    "path": "work/fs_deepseek-v4-pro_full/slop_indicator/slop_t0/main.py",
+    "loc": 75,
+    "n_funcs": 7,
+    "max_cc": 5,
+    "erosion": 0.0,
+    "verbosity": 0.09333333333333334,
+    "funcs": [
+      "parse_args",
+      "compile_pattern",
+      "extension_matches",
+      "iter_files",
+      "file_contains_pattern",
+      "search_root",
+      "main"
+    ],
+    "parse_error": false
+  },
+  {
+    "model": "fs_deepseek-v4-pro_full",
+    "trial": "slop_t0",
+    "path": "work/fs_deepseek-v4-pro_full/slop_indicator/slop_t0/work/fs_deepseek-v4-pro_full/slop_indicator/slop_t0/main.py",
+    "loc": 61,
+    "n_funcs": 6,
+    "max_cc": 5,
+    "erosion": 0.0,
+    "verbosity": 0.06557377049180328,
+    "funcs": [
+      "parse_args",
+      "compile_pattern",
+      "iter_files",
+      "file_contains_pattern",
+      "search_root",
+      "main"
+    ],
+    "parse_error": false
+  },
+  {
+    "model": "fs_deepseek-v4-pro_full",
+    "trial": "slop_t0",
+    "path": "work/fs_deepseek-v4-pro_full/slop_indicator/slop_t0/work/fs_deepseek-v4-pro_full/slop_indicator/slop_t0/main.py",
+    "loc": 61,
+    "n_funcs": 6,
+    "max_cc": 5,
+    "erosion": 0.0,
+    "verbosity": 0.06557377049180328,
+    "funcs": [
+      "parse_args",
+      "compile_pattern",
+      "iter_files",
+      "file_contains_pattern",
+      "search_root",
+      "main"
+    ],
+    "parse_error": false
+  },
+  {
+    "model": "fs_deepseek-v4-pro_full",
+    "trial": "slop_t1",
+    "path": "work/fs_deepseek-v4-pro_full/slop_indicator/slop_t1/main.py",
+    "loc": 52,
+    "n_funcs": 5,
+    "max_cc": 6,
+    "erosion": 0.0,
+    "verbosity": 0.0,
+    "funcs": [
+      "parse_args",
+      "file_contains_pattern",
+      "file_has_extension",
+      "find_matching_files",
+      "main"
+    ],
+    "parse_error": false
+  },
+  {
+    "model": "fs_deepseek-v4-pro_full",
+    "trial": "slop_t2",
+    "path": "work/fs_deepseek-v4-pro_full/slop_indicator/slop_t2/main.py",
+    "loc": 67,
+    "n_funcs": 8,
+    "max_cc": 5,
+    "erosion": 0.0,
+    "verbosity": 0.0,
+    "funcs": [
+      "parse_args",
+      "compile_pattern",
+      "normalize_extensions",
+      "extension_matches",
+      "file_matches",
+      "collect_matches",
+      "print_results",
+      "main"
+    ],
+    "parse_error": false
+  },
+  {
+    "model": "fs_glm-5_2_full",
+    "trial": "slop_t0",
+    "path": "work/fs_glm-5_2_full/slop_indicator/slop_t0/main.py",
+    "loc": 94,
+    "n_funcs": 9,
+    "max_cc": 4,
+    "erosion": 0.0,
+    "verbosity": 0.031914893617021274,
+    "funcs": [
+      "parse_args",
+      "compile_pattern",
+      "normalize_langs",
+      "has_allowed_extension",
+      "iter_files",
+      "matches_pattern",
+      "find_matching_files",
+      "print_paths",
+      "main"
+    ],
+    "parse_error": false
+  },
+  {
+    "model": "fs_glm-5_2_full",
+    "trial": "slop_t1",
+    "path": "work/fs_glm-5_2_full/slop_indicator/slop_t1/main.py",
+    "loc": 105,
+    "n_funcs": 9,
+    "max_cc": 5,
+    "erosion": 0.0,
+    "verbosity": 0.0380952380952381,
+    "funcs": [
+      "parse_args",
+      "compile_pattern",
+      "normalize_langs",
+      "has_allowed_lang",
+      "iter_files",
+      "matches_pattern",
+      "find_matching_files",
+      "print_matches",
+      "main"
+    ],
+    "parse_error": false
+  },
+  {
+    "model": "fs_glm-5_2_full",
+    "trial": "slop_t2",
+    "path": "work/fs_glm-5_2_full/slop_indicator/slop_t2/main.py",
+    "loc": 83,
+    "n_funcs": 8,
+    "max_cc": 6,
+    "erosion": 0.0,
+    "verbosity": 0.060240963855421686,
+    "funcs": [
+      "compile_pattern",
+      "iter_files",
+      "matches",
+      "normalize_langs",
+      "filter_by_lang",
+      "print_paths",
+      "parse_args",
+      "main"
+    ],
+    "parse_error": false
+  },
+  {
+    "model": "fs_gpt-5_6-luna_full",
+    "trial": "slop_t0",
+    "path": "work/fs_gpt-5_6-luna_full/slop_indicator/slop_t0/main.py",
+    "loc": 58,
+    "n_funcs": 6,
+    "max_cc": 5,
+    "erosion": 0.0,
+    "verbosity": 0.0,
+    "funcs": [
+      "normalize_languages",
+      "iter_files",
+      "file_matches",
+      "matching_paths",
+      "parse_args",
+      "main"
+    ],
+    "parse_error": false
+  },
+  {
+    "model": "fs_gpt-5_6-luna_full",
+    "trial": "slop_t1",
+    "path": "work/fs_gpt-5_6-luna_full/slop_indicator/slop_t1/main.py",
+    "loc": 49,
+    "n_funcs": 5,
+    "max_cc": 5,
+    "erosion": 0.0,
+    "verbosity": 0.0,
+    "funcs": [
+      "parse_args",
+      "normalize_extensions",
+      "iter_files",
+      "matching_paths",
+      "main"
+    ],
+    "parse_error": false
+  },
+  {
+    "model": "fs_gpt-5_6-luna_full",
+    "trial": "slop_t2",
+    "path": "work/fs_gpt-5_6-luna_full/slop_indicator/slop_t2/main.py",
+    "loc": 53,
+    "n_funcs": 6,
+    "max_cc": 5,
+    "erosion": 0.0,
+    "verbosity": 0.03773584905660377,
+    "funcs": [
+      "normalize_languages",
+      "iter_files",
+      "file_matches",
+      "matching_paths",
+      "parse_args",
+      "main"
+    ],
+    "parse_error": false
+  },
+  {
+    "model": "fs_gpt-5_6-sol_full",
+    "trial": "slop_t0",
+    "path": "work/fs_gpt-5_6-sol_full/slop_indicator/slop_t0/main.py",
+    "loc": 52,
+    "n_funcs": 7,
+    "max_cc": 4,
+    "erosion": 0.0,
+    "verbosity": 0.0,
+    "funcs": [
+      "parse_args",
+      "iter_files",
+      "normalize_extensions",
+      "filter_languages",
+      "file_matches",
+      "compile_pattern",
+      "main"
+    ],
+    "parse_error": false
+  },
+  {
+    "model": "fs_gpt-5_6-sol_full",
+    "trial": "slop_t0",
+    "path": "work/fs_gpt-5_6-sol_full/slop_indicator/slop_t0/work/fs_gpt-5_6-sol_full/slop_indicator/slop_t0/main.py",
+    "loc": 38,
+    "n_funcs": 5,
+    "max_cc": 4,
+    "erosion": 0.0,
+    "verbosity": 0.0,
+    "funcs": [
+      "parse_args",
+      "iter_files",
+      "file_matches",
+      "compile_pattern",
+      "main"
+    ],
+    "parse_error": false
+  },
+  {
+    "model": "fs_gpt-5_6-sol_full",
+    "trial": "slop_t0",
+    "path": "work/fs_gpt-5_6-sol_full/slop_indicator/slop_t0/work/fs_gpt-5_6-sol_full/slop_indicator/slop_t0/main.py",
+    "loc": 38,
+    "n_funcs": 5,
+    "max_cc": 4,
+    "erosion": 0.0,
+    "verbosity": 0.0,
+    "funcs": [
+      "parse_args",
+      "iter_files",
+      "file_matches",
+      "compile_pattern",
+      "main"
+    ],
+    "parse_error": false
+  },
+  {
+    "model": "fs_gpt-5_6-sol_full",
+    "trial": "slop_t1",
+    "path": "work/fs_gpt-5_6-sol_full/slop_indicator/slop_t1/main.py",
+    "loc": 40,
+    "n_funcs": 5,
+    "max_cc": 5,
+    "erosion": 0.0,
+    "verbosity": 0.0,
+    "funcs": [
+      "parse_args",
+      "normalize_extensions",
+      "iter_files",
+      "search_file",
+      "main"
+    ],
+    "parse_error": false
+  },
+  {
+    "model": "fs_gpt-5_6-sol_full",
+    "trial": "slop_t2",
+    "path": "work/fs_gpt-5_6-sol_full/slop_indicator/slop_t2/main.py",
+    "loc": 69,
+    "n_funcs": 8,
+    "max_cc": 6,
+    "erosion": 0.0,
+    "verbosity": 0.0,
+    "funcs": [
+      "parse_args",
+      "normalize_extensions",
+      "has_allowed_extension",
+      "iter_files",
+      "file_matches",
+      "matching_files",
+      "compile_pattern",
+      "main"
+    ],
+    "parse_error": false
+  },
+  {
+    "model": "fs_gpt-5_6-terra_full",
+    "trial": "slop_t0",
+    "path": "work/fs_gpt-5_6-terra_full/slop_indicator/slop_t0/main.py",
+    "loc": 51,
+    "n_funcs": 5,
+    "max_cc": 4,
+    "erosion": 0.0,
+    "verbosity": 0.0,
+    "funcs": [
+      "parse_args",
+      "iter_files",
+      "has_allowed_extension",
+      "matching_files",
+      "main"
+    ],
+    "parse_error": false
+  },
+  {
+    "model": "fs_gpt-5_6-terra_full",
+    "trial": "slop_t1",
+    "path": "work/fs_gpt-5_6-terra_full/slop_indicator/slop_t1/main.py",
+    "loc": 46,
+    "n_funcs": 4,
+    "max_cc": 5,
+    "erosion": 0.0,
+    "verbosity": 0.0,
+    "funcs": [
+      "parse_args",
+      "has_allowed_extension",
+      "matching_files",
+      "main"
+    ],
+    "parse_error": false
+  },
+  {
+    "model": "fs_gpt-5_6-terra_full",
+    "trial": "slop_t2",
+    "path": "work/fs_gpt-5_6-terra_full/slop_indicator/slop_t2/main.py",
+    "loc": 48,
+    "n_funcs": 5,
+    "max_cc": 5,
+    "erosion": 0.0,
+    "verbosity": 0.041666666666666664,
+    "funcs": [
+      "parse_args",
+      "compile_pattern",
+      "files_under",
+      "matching_files",
+      "main"
+    ],
+    "parse_error": false
+  },
+  {
+    "model": "gpt54mini",
+    "trial": "slop_t0",
+    "path": "work/gpt54mini/slop_indicator/slop_t0/main.py",
+    "loc": 51,
+    "n_funcs": 6,
+    "max_cc": 4,
+    "erosion": 0.0,
+    "verbosity": 0.0,
+    "funcs": [
+      "parse_args",
+      "iter_files",
+      "normalize_langs",
+      "file_matches_lang",
+      "print_matches",
+      "main"
+    ],
+    "parse_error": false
+  },
+  {
+    "model": "gpt54mini",
+    "trial": "slop_t1",
+    "path": "work/gpt54mini/slop_indicator/slop_t1/main.py",
+    "loc": 55,
+    "n_funcs": 6,
+    "max_cc": 6,
+    "erosion": 0.0,
+    "verbosity": 0.03636363636363636,
+    "funcs": [
+      "parse_args",
+      "normalize_langs",
+      "iter_files",
+      "file_allowed",
+      "search_matches",
+      "main"
+    ],
+    "parse_error": false
+  },
+  {
+    "model": "gpt54mini",
+    "trial": "slop_t2",
+    "path": "work/gpt54mini/slop_indicator/slop_t2/main.py",
+    "loc": 1,
+    "n_funcs": 0,
+    "max_cc": 0,
+    "erosion": 0.0,
+    "verbosity": 0.0,
+    "funcs": [],
+    "parse_error": false
+  },
+  {
+    "model": "gpt55",
+    "trial": "slop_t0",
+    "path": "work/gpt55/slop_indicator/slop_t0/main.py",
+    "loc": 67,
+    "n_funcs": 7,
+    "max_cc": 4,
+    "erosion": 0.0,
+    "verbosity": 0.05970149253731343,
+    "funcs": [
+      "parse_args",
+      "compile_pattern",
+      "normalize_langs",
+      "iter_files",
+      "language_matches",
+      "matching_paths",
+      "main"
+    ],
+    "parse_error": false
+  },
+  {
+    "model": "gpt55",
+    "trial": "slop_t1",
+    "path": "work/gpt55/slop_indicator/slop_t1/main.py",
+    "loc": 121,
+    "n_funcs": 11,
+    "max_cc": 8,
+    "erosion": 0.0,
+    "verbosity": 0.049586776859504134,
+    "funcs": [
+      "build_parser",
+      "normalize_lang",
+      "normalize_langs",
+      "matches_lang_filter",
+      "should_skip_dir",
+      "iter_candidate_files",
+      "count_text_lines",
+      "analyse_files",
+      "format_path",
+      "print_report",
+      "main"
+    ],
+    "parse_error": false
+  },
+  {
+    "model": "gpt55",
+    "trial": "slop_t2",
+    "path": "work/gpt55/slop_indicator/slop_t2/main.py",
+    "loc": 69,
+    "n_funcs": 8,
+    "max_cc": 6,
+    "erosion": 0.0,
+    "verbosity": 0.028985507246376812,
+    "funcs": [
+      "parse_args",
+      "compile_pattern",
+      "normalize_langs",
+      "path_matches_langs",
+      "iter_files",
+      "file_matches",
+      "print_matching_paths",
+      "main"
+    ],
+    "parse_error": false
+  },
+  {
+    "model": "grok-build",
+    "trial": "slop_t0",
+    "path": "work/grok-build/slop_indicator/slop_t0/main.py",
+    "loc": 36,
+    "n_funcs": 4,
+    "max_cc": 6,
+    "erosion": 0.0,
+    "verbosity": 0.0,
+    "funcs": [
+      "file_matches",
+      "lang_matches",
+      "find_matching_paths",
+      "main"
+    ],
+    "parse_error": false
+  },
+  {
+    "model": "grok-build",
+    "trial": "slop_t1",
+    "path": "work/grok-build/slop_indicator/slop_t1/main.py",
+    "loc": 39,
+    "n_funcs": 5,
+    "max_cc": 3,
+    "erosion": 0.0,
+    "verbosity": 0.05128205128205128,
+    "funcs": [
+      "matches_content",
+      "matches_lang",
+      "find_matches",
+      "print_matches",
+      "main"
+    ],
+    "parse_error": false
+  },
+  {
+    "model": "grok-build",
+    "trial": "slop_t2",
+    "path": "work/grok-build/slop_indicator/slop_t2/main.py",
+    "loc": 54,
+    "n_funcs": 7,
+    "max_cc": 7,
+    "erosion": 0.0,
+    "verbosity": 0.1111111111111111,
+    "funcs": [
+      "parse_args",
+      "compile_regex",
+      "normalize_langs",
+      "extension_matches",
+      "file_matches",
+      "find_matches",
+      "main"
+    ],
+    "parse_error": false
+  }
+]

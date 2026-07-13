@@ -51,12 +51,16 @@ def run_one(
     md_path = Path(job.out_md) if job.out_md else default_md
     json_path = Path(job.out_json) if job.out_json else default_json
     work = Path(job.work_dir) if job.work_dir else reports_dir / "work" / job.id[:8]
+    work.mkdir(parents=True, exist_ok=True)
     prog_path = (
         Path(job.progress_path)
         if job.progress_path
         else progress_path_for(reports_dir, job.id)
     )
-    store.update_paths(job.id, progress_path=str(prog_path))
+    # Persist work_dir so Retry/Continue reuses the same tree + checkpoints.
+    store.update_paths(
+        job.id, progress_path=str(prog_path), work_dir=str(work)
+    )
 
     def on_progress(payload: dict[str, Any]) -> None:
         write_progress(
@@ -101,6 +105,8 @@ def run_one(
             work_dir=work,
             on_progress=on_progress,
             client_extra=job.extra,
+            # Always resume when work_dir has .dsm_ae_ckpt/* from a prior attempt.
+            resume=True,
         )
         md_path.parent.mkdir(parents=True, exist_ok=True)
         md_path.write_text(render_markdown(report), encoding="utf-8")
@@ -114,17 +120,40 @@ def run_one(
             {
                 "job_id": job.id,
                 "model": job.model,
+                "phase": "scoring",
+                "status": "succeeded",
+                "done": 1,
+                "total": 1,
+                "percent": 100.0,
+                "message": "Report written — rebuilding matrix HTML…",
+                "out_json": str(json_path),
+            },
+        )
+        matrix_msg = "matrix rebuild skipped"
+        matrix_paths: list[str] = []
+        if rebuild_html:
+            ok_matrix, matrix_paths = _rebuild_matrix(reports_dir, matrix_out)
+            matrix_msg = (
+                f"matrix updated ({', '.join(matrix_paths)})"
+                if ok_matrix
+                else "matrix rebuild failed (see serve log)"
+            )
+        write_progress(
+            prog_path,
+            {
+                "job_id": job.id,
+                "model": job.model,
                 "phase": "done",
                 "status": "succeeded",
                 "done": 1,
                 "total": 1,
                 "percent": 100.0,
-                "message": "Report written",
+                "message": f"Report written; {matrix_msg}",
                 "out_json": str(json_path),
+                "out_md": str(md_path),
+                "matrix": matrix_paths,
             },
         )
-        if rebuild_html:
-            _rebuild_matrix(reports_dir, matrix_out)
         return True
     except Exception:
         err = traceback.format_exc()
@@ -187,30 +216,69 @@ def run_loop(
     return reclaimed  # pragma: no cover — infinite poll loop
 
 
-def _rebuild_matrix(reports_dir: Path, matrix_out: Path | None) -> None:
+def _rebuild_matrix(
+    reports_dir: Path, matrix_out: Path | None
+) -> tuple[bool, list[str]]:
     """Rebuild multi-model HTML matrix from diagnosis JSON under reports_dir.
 
-    Failures are logged only — they must not fail an already-succeeded job.
+    Always writes ``dsm-ae-matrix.html`` and mirrors to ``index.html`` so both
+    /matrix and the static reports root stay current. Failures are logged only
+    — they must not fail an already-succeeded job.
+
+    Returns (ok, list of written paths).
     """
-    reports_dir = Path(reports_dir)
-    out = Path(matrix_out) if matrix_out else reports_dir / "dsm-ae-matrix.html"
+    reports_dir = Path(reports_dir).resolve()
+    primary = (
+        Path(matrix_out).resolve()
+        if matrix_out
+        else reports_dir / "dsm-ae-matrix.html"
+    )
+    mirror = reports_dir / "index.html"
+    written: list[str] = []
     try:
-        script = Path.cwd() / "scripts" / "json_to_html_report.py"
-        if not script.exists():
-            script = (
-                Path(__file__).resolve().parents[3] / "scripts" / "json_to_html_report.py"
+        # Prefer package-adjacent scripts/ over cwd (serve may start elsewhere).
+        script = (
+            Path(__file__).resolve().parents[3] / "scripts" / "json_to_html_report.py"
+        )
+        if not script.is_file():
+            script = Path.cwd() / "scripts" / "json_to_html_report.py"
+        if not script.is_file():
+            print(
+                f"HTML matrix rebuild skipped: script not found ({script})",
+                file=sys.stderr,
             )
+            return False, written
+
         sys.path.insert(0, str(script.parent))
         from json_to_html_report import main as html_main  # type: ignore
 
-        args = [str(reports_dir), "-o", str(out), "--include-mock"]
+        args = [
+            str(reports_dir),
+            "-o",
+            str(primary),
+            "--include-mock",
+            "--title",
+            "DSM-AE Multi-Model Report",
+        ]
         rc = html_main(args)
         if rc != 0:
             print(
-                f"HTML matrix rebuild returned {rc} (out={out})",
+                f"HTML matrix rebuild returned {rc} (out={primary})",
                 file=sys.stderr,
             )
-        else:
-            print(f"Rebuilt matrix → {out}")
+            return False, written
+
+        written.append(str(primary))
+        # Keep /reports/ index in sync (StaticFiles html=True serves index.html).
+        if primary.resolve() != mirror.resolve():
+            try:
+                mirror.write_text(primary.read_text(encoding="utf-8"), encoding="utf-8")
+                written.append(str(mirror))
+            except OSError as e:
+                print(f"matrix mirror to index.html failed: {e}", file=sys.stderr)
+        print(f"Rebuilt matrix → {', '.join(written)}", flush=True)
+        return True, written
     except Exception as e:
         print(f"HTML matrix rebuild failed (non-fatal): {e}", file=sys.stderr)
+        traceback.print_exc(file=sys.stderr)
+        return False, written

@@ -6,6 +6,23 @@ Concurrency:
   - Optional rpm rate-limits *LLM-facing* job starts (not a pre-opened connection pool).
   - There is no long-lived connection pool per model; each job shares a ModelClient
     with a lock around complete() when concurrency > 1.
+
+Resume / checkpoints:
+  - After each pack×trial job, artifacts are written under::
+
+      {work_dir}/trajectories/{pack}__t{i}/
+        traces.json          # TrialTrace(s)
+        scores.json          # MetricResult(s)
+        conversation.json    # full LLM message lists
+        litellm.jsonl        # raw completion request/response per call
+        meta.json
+      {work_dir}/.dsm_ae_ckpt/{pack}__t{i}.json   # resume checkpoint
+
+  - With ``resume=True`` (default when ``work_dir`` is set), completed checkpoints
+    are loaded and those LLM trials are skipped — so a killed queue job can
+    continue from the last finished trial via Retry/Continue.
+  - Workspace side-effects alone are **not** enough to resume scoring; only
+    checkpointed TrialTrace + MetricResult rows are authoritative.
 """
 
 from __future__ import annotations
@@ -24,6 +41,36 @@ from dsm_ae.models import DiagnosisReport, MetricResult, ScaffoldCard, TrialTrac
 from dsm_ae.packs.registry import get_pack, list_packs
 from dsm_ae.pool import RateLimiter, map_pool
 from dsm_ae.report import render_markdown
+from dsm_ae.trajectory_store import (
+    CHECKPOINT_DIRNAME,
+    TRAJECTORIES_DIRNAME,
+    checkpoint_path,
+    count_trial_checkpoints,
+    litellm_log_path,
+    load_trial_checkpoint,
+    save_trial_artifacts,
+)
+
+# Re-export for tests / callers that imported from diagnose
+__all_traj__ = (
+    "CHECKPOINT_DIRNAME",
+    "TRAJECTORIES_DIRNAME",
+    "checkpoint_path",
+    "count_trial_checkpoints",
+    "load_trial_checkpoint",
+    "save_trial_artifacts",
+)
+
+
+def save_trial_checkpoint(
+    work_root: Path,
+    pack_id: str,
+    trial_index: int,
+    items: list[tuple[str, TrialTrace, list[MetricResult]]],
+) -> Path:
+    """Persist trajectory files + resume checkpoint; return checkpoint path."""
+    save_trial_artifacts(work_root, pack_id, trial_index, items)
+    return checkpoint_path(work_root, pack_id, trial_index)
 
 
 class LockedClient(ModelClient):
@@ -43,6 +90,11 @@ class LockedClient(ModelClient):
         if hasattr(self._inner, "set_trial"):
             with self._lock:
                 self._inner.set_trial(i)  # type: ignore[attr-defined]
+
+    def set_call_log(self, path) -> None:
+        # Thread-local on ModelClient base — no lock needed for path pointer.
+        self._inner.set_call_log(path)
+        super().set_call_log(path)
 
 
 def _infer_rpm(
@@ -81,7 +133,21 @@ def diagnose(
     rpm: float | None = None,
     on_progress: Callable[[dict[str, Any]], None] | None = None,
     client_extra: dict[str, Any] | None = None,
+    resume: bool | None = None,
+    treatment: str | None = None,
 ) -> DiagnosisReport:
+    """Run packs×k trials and build a DiagnosisReport.
+
+    Parameters
+    ----------
+    resume:
+        If True, skip pack×trial jobs that already have a valid checkpoint under
+        ``work_dir/.dsm_ae_ckpt/``. Default: True when ``work_dir`` is set, else
+        False (temp dirs are fresh).
+    treatment:
+        Optional treatment id (e.g. ``prompt_reminder``) to wrap the adapter and
+        inject system/user prompt interventions before each pack trial.
+    """
     packs = packs or list_packs()
     inferred_rpm = _infer_rpm(models_yaml, model, rpm)
     card = ScaffoldCard(
@@ -95,6 +161,7 @@ def diagnose(
             "api_base": api_base,
             "concurrency": concurrency,
             "rpm": inferred_rpm,
+            "treatment": treatment,
         },
     )
     raw_client: ModelClient = make_client(
@@ -108,10 +175,17 @@ def diagnose(
     client: ModelClient = (
         LockedClient(raw_client) if concurrency and concurrency > 1 else raw_client
     )
-    adapter = RawToolLoopAdapter(client, card)
+    adapter: Any = RawToolLoopAdapter(client, card)
+    if treatment:
+        from dsm_ae.treatment import TreatedAdapter, get_treatment
+
+        t = get_treatment(treatment)
+        adapter = TreatedAdapter(adapter, t)
 
     root = Path(work_dir) if work_dir else Path(tempfile.mkdtemp(prefix="dsm_ae_"))
     root.mkdir(parents=True, exist_ok=True)
+    do_resume = bool(resume) if resume is not None else bool(work_dir)
+    preexisting = count_trial_checkpoints(root) if do_resume else 0
 
     notes: list[str] = [
         f"Work dir: {root}",
@@ -120,7 +194,16 @@ def diagnose(
         f"Disorder if pass_rate < {threshold_pass} OR std > {threshold_std}.",
         f"Concurrency={concurrency} (N workers for pack×trial jobs; default 1=sequential).",
         f"RPM limit={inferred_rpm if inferred_rpm else 'none'} (job-start spacing, not connection pool).",
+        f"Resume={do_resume} (checkpoints under {CHECKPOINT_DIRNAME}/).",
+        f"Trajectories + LiteLLM JSONL under {TRAJECTORIES_DIRNAME}/.",
+        f"Treatment: {treatment or 'none (baseline)'}.",
+        # Smoke/floor honesty for weak gates (see weak-metric-audits/)
+        "SMOKE/FLOOR metrics (tier1): erosion_indicator[.tier1], verbosity_indicator[.tier1], "
+        "quality_stable[.tier1], critical_preserved[.tier1] — saturated floors, not full "
+        "CQ-01/CQ-02/AA-04 diagnostics. Prefer erosion_indicator.tier2 / .tier3 when present.",
     ]
+    if preexisting:
+        notes.append(f"Found {preexisting} existing trial checkpoint(s) to reuse.")
 
     jobs: list[tuple[str, int]] = [
         (pack_id, trial_i) for pack_id in packs for trial_i in range(k)
@@ -128,6 +211,7 @@ def diagnose(
     total = len(jobs)
     done_lock = threading.Lock()
     done_count = 0
+    resumed_count = 0
 
     def _emit(payload: dict[str, Any]) -> None:
         if on_progress is None:
@@ -143,27 +227,81 @@ def diagnose(
             "status": "running",
             "done": 0,
             "total": total,
-            "message": f"Starting {total} pack×trial jobs",
+            "message": (
+                f"Starting {total} pack×trial jobs"
+                + (
+                    f" ({preexisting} checkpoint(s) may be reused)"
+                    if preexisting
+                    else ""
+                )
+            ),
             "packs": list(packs),
             "k": k,
+            "resume": do_resume,
+            "checkpoints_found": preexisting,
         }
     )
 
     limiter = RateLimiter(inferred_rpm)
 
     def _run_job(job: tuple[str, int]) -> list[tuple[str, TrialTrace, list[MetricResult]]]:
-        nonlocal done_count
+        nonlocal done_count, resumed_count
         pack_id, trial_i = job
+
+        if do_resume:
+            cached = load_trial_checkpoint(root, pack_id, trial_i)
+            if cached is not None:
+                with done_lock:
+                    done_count += 1
+                    resumed_count += 1
+                    cur = done_count
+                    rcur = resumed_count
+                _emit(
+                    {
+                        "phase": "running",
+                        "status": "running",
+                        "done": cur,
+                        "total": total,
+                        "current_pack": pack_id,
+                        "current_trial": trial_i,
+                        "resumed": True,
+                        "resumed_count": rcur,
+                        "message": (
+                            f"{pack_id} trial {trial_i + 1}/{k} resumed from checkpoint "
+                            f"({cur}/{total})"
+                        ),
+                    }
+                )
+                return cached
+
         pack = get_pack(pack_id)
         # set_trial for mock personas
         if hasattr(client, "set_trial"):
             client.set_trial(trial_i)  # type: ignore[attr-defined]
         elif hasattr(raw_client, "set_trial"):
             raw_client.set_trial(trial_i)  # type: ignore[attr-defined]
-        traces = pack.run_trial(adapter, root / pack_id, trial_i)
-        out: list[tuple[str, TrialTrace, list[MetricResult]]] = []
-        for tr in traces:
-            out.append((pack_id, tr, pack.score(tr)))
+
+        # Raw LiteLLM (or mock) call log for this pack×trial
+        call_log = litellm_log_path(root, pack_id, trial_i)
+        try:
+            if call_log.is_file():
+                call_log.unlink()  # fresh log for this attempt
+        except OSError:
+            pass
+        client.set_call_log(call_log)
+        try:
+            traces = pack.run_trial(adapter, root / pack_id, trial_i)
+            out: list[tuple[str, TrialTrace, list[MetricResult]]] = []
+            for tr in traces:
+                out.append((pack_id, tr, pack.score(tr)))
+        finally:
+            client.set_call_log(None)
+
+        try:
+            save_trial_checkpoint(root, pack_id, trial_i, out)
+        except Exception:
+            # Checkpoint is best-effort; never fail the trial on write errors.
+            pass
         with done_lock:
             done_count += 1
             cur = done_count
@@ -175,6 +313,7 @@ def diagnose(
                 "total": total,
                 "current_pack": pack_id,
                 "current_trial": trial_i,
+                "resumed": False,
                 "message": f"{pack_id} trial {trial_i + 1}/{k} complete ({cur}/{total})",
             }
         )
@@ -196,6 +335,11 @@ def diagnose(
             for m in scores:
                 bucket.setdefault(m.metric_id, []).append(m)
 
+    if resumed_count:
+        notes.append(
+            f"Resumed {resumed_count}/{total} pack×trial job(s) from checkpoint."
+        )
+
     _emit(
         {
             "phase": "scoring",
@@ -203,6 +347,7 @@ def diagnose(
             "done": total,
             "total": total,
             "message": "Scoring metrics and findings",
+            "resumed_count": resumed_count,
         }
     )
 
@@ -238,6 +383,7 @@ def diagnose(
             "total": total,
             "message": "Diagnosis complete",
             "findings_present": sum(1 for f in findings if f.present),
+            "resumed_count": resumed_count,
         }
     )
     return report

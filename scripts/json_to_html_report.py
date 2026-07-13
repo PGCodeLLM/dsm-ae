@@ -33,6 +33,7 @@ try:
         gates_from_report_acc,
         tree_to_mermaid,
     )
+    from dsm_ae.packs.smoke_metrics import is_smoke_metric
 except ImportError:
     sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
     from dsm_ae.metric_citations import citations_for_metric, references_used
@@ -44,6 +45,27 @@ except ImportError:
         gates_from_report_acc,
         tree_to_mermaid,
     )
+    from dsm_ae.packs.smoke_metrics import is_smoke_metric
+
+
+# Workspace / trajectory / progress trees are not diagnosis reports; scanning
+# them is slow and can grow without bound under reports/work/.
+_SKIP_DIR_NAMES = frozenset(
+    {
+        "work",
+        "trajectories",
+        ".dsm_ae_ckpt",
+        "progress",
+        "__pycache__",
+        ".git",
+        "node_modules",
+    }
+)
+
+
+def _is_noise_json(path: Path) -> bool:
+    """True if path sits under a non-report directory."""
+    return any(part in _SKIP_DIR_NAMES for part in path.parts)
 
 
 def discover_jsons(paths: list[Path]) -> list[Path]:
@@ -52,7 +74,10 @@ def discover_jsons(paths: list[Path]) -> list[Path]:
         if p.is_file() and p.suffix == ".json":
             found.append(p)
         elif p.is_dir():
-            found.extend(sorted(p.rglob("*.json")))
+            for jp in sorted(p.rglob("*.json")):
+                if _is_noise_json(jp.relative_to(p) if jp.is_relative_to(p) else jp):
+                    continue
+                found.append(jp)
     out: list[Path] = []
     seen: set[Path] = set()
     for p in found:
@@ -202,7 +227,7 @@ def humanize_eval_text(text: str) -> str:
         except Exception:
             std_s = std
         return (
-            f"{n} trials · mean {mean_s} · std {std_s} · "
+            f"{n} trials · mean {mean_s} · σ={std_s} · "
             f"{pr_s} pass → {status_label}"
         )
 
@@ -211,7 +236,8 @@ def humanize_eval_text(text: str) -> str:
         _stats,
         s,
     )
-    s = s.replace(" (DISORDER)", " (disorder)").replace(" (ATTUNED)", " (attuned)")
+    s = s.replace(" (DISORDER)", "").replace(" (ATTUNED)", " (attuned)")
+    s = s.replace(" (disorder)", "")
     return s
 
 
@@ -221,7 +247,6 @@ def fmt_gate_cell(gate: dict[str, Any] | None) -> tuple[str, str]:
     status = str(gate.get("status") or "?")
     pr = gate.get("pass_rate")
     std = gate.get("std")
-    disorder = gate.get("disorder")
     try:
         pr_s = f"{float(pr):.0%}"
     except Exception:
@@ -230,13 +255,8 @@ def fmt_gate_cell(gate: dict[str, Any] | None) -> tuple[str, str]:
         std_s = f"{float(std):.2f}"
     except Exception:
         std_s = "?"
-    status_label = {
-        "PASS": "Pass",
-        "FAIL": "Fail",
-        "UNSTABLE": "Unstable",
-    }.get(status.upper(), status)
-    dis = " · disorder" if disorder else ""
-    text = f"{status_label} · {pr_s} pass · std {std_s}{dis}"
+    # Color encodes status; cell text is just pass rate + σ.
+    text = f"{pr_s} pass · σ={std_s}"
     return text, status_class(status)
 
 
@@ -343,15 +363,10 @@ def render_model_pathway(
                     continue
                 pr = f"{g.pass_rate:.0%}" if g.pass_rate is not None else "?"
                 st = f"{g.std:.2f}" if g.std is not None else "?"
-                st_label = {
-                    "PASS": "Pass",
-                    "FAIL": "Fail",
-                    "UNSTABLE": "Unstable",
-                }.get(str(g.status).upper(), str(g.status))
                 chips.append(
                     f'<div class="gate-chip {status_class(g.status)}">'
                     f"<code>{_esc(g.metric_id)}</code> "
-                    f"{_esc(st_label)} · {_esc(pr)} pass · std {_esc(st)}"
+                    f"{_esc(pr)} pass · σ={_esc(st)}"
                     f"</div>"
                 )
             gate_html = "".join(chips)
@@ -475,6 +490,14 @@ def build_html(
             metric_label = f"<code>{html.escape(metric)}</code> {cite_html}"
         else:
             metric_label = f"<code>{html.escape(metric)}</code>"
+        if is_smoke_metric(metric):
+            metric_label += (
+                ' <span class="badge smoke" title="Smoke/floor tier1 — not full '
+                'disorder diagnostic">smoke</span>'
+            )
+            row_cls = "row metric smoke-metric"
+        else:
+            row_cls = "row metric"
         cells = []
         for m in models:
             text, cls = fmt_gate_cell(by_model[m]["gates"].get(metric))
@@ -485,7 +508,7 @@ def build_html(
                 title_attr = f' title="{html.escape(tip)}"'
             cells.append(f"<td class='{cls}'{title_attr}>{html.escape(text)}</td>")
         gate_rows.append(
-            f"<tr><th class='row metric'>{metric_label}</th>{''.join(cells)}</tr>"
+            f"<tr><th class='{row_cls}'>{metric_label}</th>{''.join(cells)}</tr>"
         )
 
     # findings matrix
@@ -580,6 +603,11 @@ def build_html(
     font: 13px/1.35 system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
     background: #fff; color: #111;
   }}
+  /* When embedded under the Comparison tab, drop outer padding so the report
+     sits flush with the shell (parent page is the only vertical scroller). */
+  html.embedded-in-shell body {{
+    padding: 0 14px 8px;
+  }}
   h1 {{ margin: 0 0 4px; font-size: 1.2rem; }}
   h2 {{ margin: 16px 0 6px; font-size: 1.05rem; }}
   h3 {{ margin: 12px 0 6px; font-size: 0.95rem; }}
@@ -593,16 +621,46 @@ def build_html(
   .swatch.not-run, td.not-run {{ background: #eee; color: #555; font-style: italic; }}
   .swatch.present, td.present {{ background: #ffcdd2; }}
   .swatch.absent, td.absent {{ background: #c8e6c9; }}
-  .panel {{ border: 1px solid #ccc; overflow: auto; margin: 0 0 6px; }}
-  table {{ border-collapse: collapse; width: 100%; font-size: 12px; }}
-  th, td {{ border: 1px solid #ccc; padding: 2px 5px; text-align: center; vertical-align: middle; }}
-  th.model, th.corner {{ position: sticky; top: 0; background: #f5f5f5; z-index: 2; }}
-  th.corner {{ left: 0; z-index: 3; text-align: left; }}
+  /* No nested vertical scroll: page (or parent shell) scrolls. Horizontal
+     scroll only for wide multi-model tables. */
+  .panel {{
+    border: 1px solid #ccc; margin: 0 0 6px;
+    max-height: none;
+    overflow-x: auto;
+    overflow-y: visible;
+  }}
+  /* separate + spacing 0: sticky is more reliable than border-collapse: collapse */
+  table {{
+    border-collapse: separate; border-spacing: 0;
+    width: max-content; min-width: 100%; font-size: 12px;
+  }}
+  th, td {{
+    border: 1px solid #ccc; padding: 2px 5px;
+    text-align: center; vertical-align: middle;
+    background-clip: padding-box;
+  }}
+  /* Column headers stick to the viewport when the document scrolls
+     (full-page view). Inside a full-height iframe embed, the parent shell scrolls. */
+  thead th {{
+    position: sticky; top: 0; z-index: 3;
+    background: #f5f5f5;
+    box-shadow: 0 1px 0 #ccc;
+  }}
+  th.model, th.corner {{
+    position: sticky; top: 0; background: #f5f5f5; z-index: 3;
+  }}
+  /* Top-left corner: stick both axes */
+  th.corner {{
+    left: 0; z-index: 5; text-align: left;
+    box-shadow: 1px 0 0 #ccc, 0 1px 0 #ccc;
+  }}
+  /* Row labels: stick to left while scrolling horizontally within .panel */
   th.row {{
     position: sticky; left: 0; background: #fafafa; text-align: left;
-    z-index: 1; font-weight: 600; max-width: 320px;
+    z-index: 2; font-weight: 600; max-width: 320px;
+    box-shadow: 1px 0 0 #ccc;
   }}
-  th.row.metric {{ font-size: 13px; }}
+  th.row.metric {{ font-size: 13px; background: #fafafa; }}
   th.row.metric code {{ font-size: 13px; }}
   td {{ font-variant-numeric: tabular-nums; }}
   code {{ font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }}
@@ -670,6 +728,15 @@ def build_html(
   .badge.present {{ background: #ffcdd2; }}
   .badge.absent {{ background: #c8e6c9; }}
   .badge.neval {{ background: #eee; }}
+  .badge.smoke {{
+    background: #fff8e1; border-color: #ffb300; color: #6d4c00;
+    font-size: 10px; font-weight: 700; text-transform: uppercase;
+    letter-spacing: 0.03em; margin-left: 4px; vertical-align: middle;
+  }}
+  th.row.smoke-metric {{ background: #fffde7; }}
+  th.row.smoke-metric code {{ color: #5d4037; }}
+  /* Keep smoke row sticky bg when scrolling */
+  th.row.smoke-metric {{ z-index: 2; }}
   details.evidence-details {{ margin-top: 4px; font-size: 12px; }}
   details.evidence-details > summary {{ cursor: pointer; color: #0645ad; }}
   ol.path-steps {{ margin: 4px 0 0; padding-left: 18px; }}

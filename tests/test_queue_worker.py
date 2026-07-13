@@ -207,3 +207,60 @@ def test_worker_cli_reclaims_stale(tmp_path: Path):
     job = store.get(jid)
     assert job is not None
     assert job.status == JobStatus.FAILED
+
+
+def test_retry_resumes_from_checkpoints(tmp_path: Path):
+    """Failed job re-queued reuses work_dir checkpoints (skips completed trials)."""
+    db = tmp_path / "q.db"
+    reports = tmp_path / "reports"
+    store = JobStore(db)
+    jid = store.enqueue(model="mock/well_attuned", packs=["hello_metacog"], k=2)
+    assert run_one(store, worker_id="t1", reports_dir=reports, models_yaml=None) is True
+    job = store.get(jid)
+    assert job is not None
+    assert job.status == JobStatus.SUCCEEDED
+    assert job.work_dir
+    work = Path(job.work_dir)
+    from dsm_ae.diagnose import count_trial_checkpoints
+
+    assert count_trial_checkpoints(work) == 2
+
+    # Simulate partial re-run: delete one checkpoint, mark failed, retry
+    ckpts = sorted((work / ".dsm_ae_ckpt").glob("*.json"))
+    ckpts[-1].unlink()
+    store.mark_failed(jid, "simulated interrupt")
+    assert store.retry(jid) is True
+    assert run_one(store, worker_id="t2", reports_dir=reports, models_yaml=None) is True
+    job2 = store.get(jid)
+    assert job2 is not None
+    assert job2.status == JobStatus.SUCCEEDED
+    assert count_trial_checkpoints(work) == 2
+
+
+def test_successful_job_rebuilds_matrix_html(tmp_path: Path):
+    """On success, worker rebuilds dsm-ae-matrix.html and index.html under reports_dir."""
+    db = tmp_path / "q.db"
+    reports = tmp_path / "reports"
+    # noise that must not break discovery
+    (reports / "work" / "x" / "trajectories" / "p__t0").mkdir(parents=True)
+    (reports / "work" / "x" / "trajectories" / "p__t0" / "scores.json").write_text(
+        '{"not":"a report"}', encoding="utf-8"
+    )
+    store = JobStore(db)
+    jid = store.enqueue(model="mock/well_attuned", packs=["hello_metacog"], k=1)
+    ok = run_one(store, worker_id="t", reports_dir=reports, models_yaml=None)
+    assert ok is True
+    job = store.get(jid)
+    assert job is not None and job.status == JobStatus.SUCCEEDED
+    matrix = reports / "dsm-ae-matrix.html"
+    index = reports / "index.html"
+    assert matrix.is_file(), "matrix HTML should be rebuilt after success"
+    assert index.is_file(), "index.html mirror should be written"
+    assert "DSM-AE" in matrix.read_text(encoding="utf-8")[:500]
+    # progress mentions matrix
+    from dsm_ae.queue.progress import progress_path_for
+    import json
+
+    prog = json.loads(Path(job.progress_path or progress_path_for(reports, jid)).read_text())
+    assert prog.get("status") == "succeeded"
+    assert "matrix" in (prog.get("message") or "").lower() or prog.get("matrix")

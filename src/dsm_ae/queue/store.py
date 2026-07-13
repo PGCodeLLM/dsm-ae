@@ -247,6 +247,7 @@ class JobStore:
         *,
         progress_path: str | None = None,
         secret_path: str | None = None,
+        work_dir: str | None = None,
     ) -> None:
         if progress_path is not None:
             self._conn.execute(
@@ -257,6 +258,11 @@ class JobStore:
             self._conn.execute(
                 "UPDATE eval_jobs SET secret_path=? WHERE id=?",
                 (secret_path, job_id),
+            )
+        if work_dir is not None:
+            self._conn.execute(
+                "UPDATE eval_jobs SET work_dir=? WHERE id=?",
+                (work_dir, job_id),
             )
         self._conn.commit()
 

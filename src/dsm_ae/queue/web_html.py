@@ -2,31 +2,139 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
+from typing import Callable
 
 from dsm_ae.packs.registry import list_packs
 from dsm_ae.queue.store import JobStore
 
+Href = Callable[[str], str]
+
 
 def _esc(s: str) -> str:
     return (
-        s.replace("&", "&amp;")
+        str(s)
+        .replace("&", "&amp;")
         .replace("<", "&lt;")
         .replace(">", "&gt;")
         .replace('"', "&quot;")
     )
 
 
-def render_queue_page(store: JobStore, href, auth_required: bool, title: str) -> str:
+def _configured_base(href: Href) -> str:
+    sample = href("/queue")
+    if sample.startswith("/") and sample.endswith("/queue"):
+        return sample[: -len("/queue")]
+    return ""
+
+
+def render_nav(href: Href, active: str = "") -> str:
+    """Shared top nav: Queue | Comparison | Reports | API | Treatment.
+
+    ``active`` is a path key: ``/``, ``/matrix``, ``/reports-ui``, ``/docs``,
+    ``/treatment``. API opens in a new tab (Swagger); other primary tabs stay
+    in-app so the chrome never disappears.
+    """
+    items: list[tuple[str, str, bool]] = [
+        ("/", "Queue", False),
+        ("/matrix", "Comparison", False),
+        ("/reports-ui", "Reports", False),
+        ("/docs", "API", True),
+        ("/treatment", "Treatment", False),
+    ]
+    parts: list[str] = []
+    for path, label, blank in items:
+        cls = ' class="active"' if path == active else ""
+        target = ' target="_blank" rel="noopener"' if blank else ""
+        parts.append(
+            f'<a href="{href(path)}" data-nav="{_esc(path)}"{cls}{target}>{_esc(label)}</a>'
+        )
+    return "<nav>\n    " + "\n    ".join(parts) + "\n  </nav>"
+
+
+def _shared_shell_css() -> str:
+    return """
+  :root { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; }
+  body { margin: 0; padding: 16px 18px; background: #fafafa; color: #111; }
+  h1 { font-size: 1.25rem; margin: 0 0 4px; }
+  h2 { font-size: 1.05rem; margin: 18px 0 8px; }
+  h3 { font-size: 0.95rem; margin: 14px 0 6px; }
+  .meta { color: #555; font-size: 13px; margin: 0 0 12px; }
+  nav { margin: 0 0 14px; }
+  nav a { margin-right: 12px; color: #0645ad; text-decoration: none; }
+  nav a:hover { text-decoration: underline; }
+  nav a.active { font-weight: 600; color: #111; text-decoration: none; border-bottom: 2px solid #1565c0; }
+  .panel { background: #fff; border: 1px solid #ddd; border-radius: 6px;
+            padding: 12px 14px; margin: 0 0 14px; }
+  table { border-collapse: collapse; width: 100%; font-size: 13px; }
+  th, td { border: 1px solid #e0e0e0; padding: 4px 6px; text-align: left; vertical-align: top; }
+  th { background: #f5f5f5; }
+  code, pre { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; }
+  pre { background: #f6f8fa; border: 1px solid #e0e0e0; border-radius: 4px;
+        padding: 10px 12px; overflow: auto; white-space: pre-wrap; }
+  .md-body { font-size: 13px; line-height: 1.45; }
+  .md-body h1 { font-size: 1.15rem; margin: 0 0 10px; }
+  .md-body h2 { font-size: 1.05rem; margin: 14px 0 8px; }
+  .md-body p { margin: 0 0 8px; }
+  .md-body table { margin: 8px 0 4px; max-width: 720px; }
+  .md-body th { font-weight: 600; }
+  .md-body tr:nth-child(even) td { background: #fafafa; }
+  .hint { color: #666; font-size: 12px; }
+  ul.file-list { margin: 0; padding-left: 18px; font-size: 13px; }
+  ul.file-list li { margin: 2px 0; }
+  /* Comparison embed: no nested viewport — iframe grows to content height so
+     only the parent page scrolls (not iframe + inner panels + page). */
+  body.comparison-page { padding-bottom: 0; }
+  .iframe-wrap {
+    border: 0; border-radius: 0; overflow: visible;
+    background: transparent; height: auto; min-height: 0;
+    margin: 0 -18px; /* flush with viewport edges under shell padding */
+  }
+  .iframe-wrap iframe {
+    width: 100%; height: auto; min-height: 200px;
+    border: 0; display: block; vertical-align: top;
+  }
+  .help-cmd { background: #f0f4f8; padding: 2px 6px; border-radius: 3px; }
+"""
+
+
+def _nav_base_script() -> str:
+    """Client-side public_base detection + data-nav href rewrite (funnel-safe)."""
+    return """
+<script>
+(function () {
+  function detectBase() {
+    const p = location.pathname || "/";
+    if (p === "/dsm-ae" || p.startsWith("/dsm-ae/")) return "/dsm-ae";
+    const configured = (document.body.dataset.configuredBase || "").replace(/\\/$/, "");
+    if (configured && (p === configured || p.startsWith(configured + "/"))) return configured;
+    return "";
+  }
+  const BASE = detectBase();
+  function href(path) {
+    if (!path.startsWith("/")) path = "/" + path;
+    return BASE + path;
+  }
+  document.querySelectorAll("a[data-nav]").forEach((a) => {
+    a.setAttribute("href", href(a.getAttribute("data-nav") || "/"));
+  });
+  document.querySelectorAll("a[data-static]").forEach((a) => {
+    const p = a.getAttribute("data-static") || "/";
+    a.setAttribute("href", href(p));
+  });
+})();
+</script>
+"""
+
+
+def render_queue_page(store: JobStore, href: Href, auth_required: bool, title: str) -> str:
     packs = list_packs()
     pack_checks = "\n".join(
         f'<label class="pack-item"><input type="checkbox" class="pack-cb" value="{_esc(p)}"/>'
         f"<span>{_esc(p)}</span></label>"
         for p in packs
     )
-    sample = href("/queue")
-    configured_base = ""
-    if sample.startswith("/") and sample.endswith("/queue"):
-        configured_base = sample[: -len("/queue")]
+    configured_base = _configured_base(href)
     token_row = ""
     if auth_required:
         token_row = """
@@ -37,6 +145,7 @@ def render_queue_page(store: JobStore, href, auth_required: bool, title: str) ->
         </label>
         <p class="hint" id="token-status" hidden></p>
         """
+    nav = render_nav(href, active="/")
     return f"""<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -49,7 +158,10 @@ def render_queue_page(store: JobStore, href, auth_required: bool, title: str) ->
   h1 {{ font-size: 1.25rem; margin: 0 0 4px; }}
   h2 {{ font-size: 1.05rem; margin: 18px 0 8px; }}
   .meta {{ color: #555; font-size: 13px; margin: 0 0 12px; }}
-  nav a {{ margin-right: 12px; color: #0645ad; }}
+  nav {{ margin: 0 0 14px; }}
+  nav a {{ margin-right: 12px; color: #0645ad; text-decoration: none; }}
+  nav a:hover {{ text-decoration: underline; }}
+  nav a.active {{ font-weight: 600; color: #111; text-decoration: none; border-bottom: 2px solid #1565c0; }}
   .panel {{ background: #fff; border: 1px solid #ddd; border-radius: 6px;
             padding: 12px 14px; margin: 0 0 14px; }}
   table {{ border-collapse: collapse; width: 100%; font-size: 13px; }}
@@ -112,12 +224,7 @@ def render_queue_page(store: JobStore, href, auth_required: bool, title: str) ->
 <body data-configured-base="{_esc(configured_base)}">
   <h1>Eval queue</h1>
   <p class="meta">Add a model, choose packs, and run evaluations.</p>
-  <nav>
-    <a href="{href("/")}" data-nav="/">Queue</a>
-    <a href="{href("/matrix")}" data-nav="/matrix" target="_blank" rel="noopener">Comparison</a>
-    <a href="{href("/reports/")}" data-nav="/reports/" target="_blank" rel="noopener">Reports</a>
-    <a href="{href("/docs")}" data-nav="/docs" target="_blank" rel="noopener">API</a>
-  </nav>
+  {nav}
   <div id="flash" role="status" aria-live="polite"></div>
 
   <div class="panel">
@@ -424,7 +531,7 @@ def render_queue_page(store: JobStore, href, auth_required: bool, title: str) ->
       if (j.status === "queued")
         actions = '<button type="button" class="action" data-act="cancel" data-id="'+esc(j.id)+'">cancel</button>';
       else if (j.status === "failed" || j.status === "cancelled")
-        actions = '<button type="button" class="action" data-act="retry" data-id="'+esc(j.id)+'">retry</button>';
+        actions = '<button type="button" class="action" data-act="retry" data-id="'+esc(j.id)+'" title="Re-queue; finished pack×trials resume from .dsm_ae_ckpt">continue</button>';
       const endpoint = j.api_base ? (' <span class="hint" title="'+esc(j.api_base)+'">↗</span>') : "";
       return "<tr>" +
         '<td><code title="'+esc(j.id)+'">'+esc(j.id.slice(0,8))+"</code></td>" +
@@ -602,3 +709,490 @@ def render_queue_page(store: JobStore, href, auth_required: bool, title: str) ->
 </body>
 </html>
 """
+
+
+def _parse_treatment_result_name(name: str) -> tuple[str, str]:
+    """Best-effort split of ``model-arm.ext`` report filenames."""
+    stem = Path(name).stem
+    known_arms = (
+        "baseline",
+        "prompt_reminder",
+        "skill_scaffold",
+        "expert_oversight",
+    )
+    for arm in known_arms:
+        if stem.endswith("-" + arm):
+            return stem[: -(len(arm) + 1)], arm
+    if "-" in stem:
+        model, arm = stem.rsplit("-", 1)
+        return model, arm
+    return stem, "—"
+
+
+def _is_md_table_row(line: str) -> bool:
+    s = line.strip()
+    return s.startswith("|") and s.count("|") >= 2
+
+
+def _is_md_table_sep(line: str) -> bool:
+    s = line.strip().strip("|")
+    if not s or "|" not in line:
+        return False
+    cells = [c.strip() for c in s.split("|")]
+    return all(c and set(c) <= set("-: ") for c in cells)
+
+
+def _md_row_cells(line: str) -> list[str]:
+    s = line.strip().strip("|")
+    return [c.strip() for c in s.split("|")]
+
+
+def render_simple_markdown(md: str) -> str:
+    """Render a small Markdown subset to HTML (headings, paragraphs, GFM tables).
+
+    Used for treatment SUMMARY.md etc. Avoids a markdown dependency; escapes text.
+    """
+    lines = md.replace("\r\n", "\n").split("\n")
+    out: list[str] = []
+    i = 0
+    n = len(lines)
+
+    def flush_para(buf: list[str]) -> None:
+        if not buf:
+            return
+        text = " ".join(x.strip() for x in buf if x.strip())
+        if text:
+            out.append(f"<p>{_esc(text)}</p>")
+        buf.clear()
+
+    para: list[str] = []
+    while i < n:
+        line = lines[i]
+        if not line.strip():
+            flush_para(para)
+            i += 1
+            continue
+        if line.startswith("### "):
+            flush_para(para)
+            out.append(f"<h3>{_esc(line[4:].strip())}</h3>")
+            i += 1
+            continue
+        if line.startswith("## "):
+            flush_para(para)
+            out.append(f"<h2>{_esc(line[3:].strip())}</h2>")
+            i += 1
+            continue
+        if line.startswith("# "):
+            flush_para(para)
+            out.append(f"<h1>{_esc(line[2:].strip())}</h1>")
+            i += 1
+            continue
+        if _is_md_table_row(line):
+            flush_para(para)
+            rows: list[list[str]] = []
+            while i < n and _is_md_table_row(lines[i]):
+                if not _is_md_table_sep(lines[i]):
+                    rows.append(_md_row_cells(lines[i]))
+                i += 1
+            if not rows:
+                continue
+            head, *body = rows
+            out.append("<table>")
+            out.append(
+                "<thead><tr>"
+                + "".join(f"<th>{_esc(c)}</th>" for c in head)
+                + "</tr></thead>"
+            )
+            out.append("<tbody>")
+            for row in body:
+                # pad/truncate to header width for ragged rows
+                cells = (row + [""] * len(head))[: len(head)]
+                out.append(
+                    "<tr>" + "".join(f"<td>{_esc(c)}</td>" for c in cells) + "</tr>"
+                )
+            out.append("</tbody></table>")
+            continue
+        para.append(line)
+        i += 1
+    flush_para(para)
+    return "\n".join(out) if out else ""
+
+
+def render_treatment_page(href: Href, reports_dir: Path | str, title: str = "Treatment") -> str:
+    """Read-only dashboard for registered treatments and trial results."""
+    from dsm_ae.treatment import get_treatment, list_treatments
+
+    reports_dir = Path(reports_dir)
+    configured_base = _configured_base(href)
+    nav = render_nav(href, active="/treatment")
+
+    treatment_rows: list[str] = []
+    for tid in list_treatments():
+        t = get_treatment(tid)
+        treatment_rows.append(
+            "<tr>"
+            f"<td><code>{_esc(t.id)}</code></td>"
+            f"<td>{_esc(t.name)}</td>"
+            f"<td>{_esc(t.description or '')}</td>"
+            "</tr>"
+        )
+    treatments_table = (
+        "\n".join(treatment_rows)
+        if treatment_rows
+        else '<tr><td colspan="3" class="hint">No treatments registered</td></tr>'
+    )
+
+    treatment_dir = reports_dir / "treatment"
+    summary_html = '<p class="hint">No SUMMARY.md under <code>reports/treatment/</code> yet.</p>'
+    if (treatment_dir / "SUMMARY.md").is_file():
+        raw = (treatment_dir / "SUMMARY.md").read_text(encoding="utf-8", errors="replace")
+        rendered = render_simple_markdown(raw)
+        summary_html = (
+            f'<div class="md-body">{rendered}</div>'
+            f'<p class="hint" style="margin-top:8px">'
+            f'<a href="{href("/reports/treatment/SUMMARY.md")}" '
+            f'data-static="/reports/treatment/SUMMARY.md">Raw SUMMARY.md</a></p>'
+        )
+
+    file_rows: list[str] = []
+    if treatment_dir.is_dir():
+        files = sorted(
+            p
+            for p in treatment_dir.iterdir()
+            if p.is_file() and p.suffix in (".json", ".md") and p.name != "SUMMARY.md"
+        )
+        # Group by stem so .md + .json share one row when possible
+        by_stem: dict[str, dict[str, Path]] = {}
+        for p in files:
+            by_stem.setdefault(p.stem, {})[p.suffix] = p
+        for stem in sorted(by_stem):
+            model, arm = _parse_treatment_result_name(stem + ".md")
+            links: list[str] = []
+            for suf, label in ((".md", "md"), (".json", "json")):
+                p = by_stem[stem].get(suf)
+                if p:
+                    rel = f"/reports/treatment/{p.name}"
+                    links.append(
+                        f'<a href="{href(rel)}" data-static="{_esc(rel)}">{_esc(label)}</a>'
+                    )
+            file_rows.append(
+                "<tr>"
+                f"<td><code>{_esc(model)}</code></td>"
+                f"<td><code>{_esc(arm)}</code></td>"
+                f"<td>{' · '.join(links)}</td>"
+                f"<td><code>reports/treatment/{_esc(stem)}.*</code></td>"
+                "</tr>"
+            )
+    files_table = (
+        "\n".join(file_rows)
+        if file_rows
+        else '<tr><td colspan="4" class="hint">No treatment result files yet</td></tr>'
+    )
+
+    work_items: list[str] = []
+    luna_root = reports_dir / "work" / "treatment_luna"
+    if luna_root.is_dir():
+        for d in sorted(luna_root.iterdir()):
+            if d.is_dir():
+                rel = f"/reports/work/treatment_luna/{d.name}/"
+                work_items.append(
+                    f'<li><a href="{href(rel)}" data-static="{_esc(rel)}">'
+                    f"<code>{_esc(d.name)}</code></a>"
+                    f' <span class="hint">reports/work/treatment_luna/{_esc(d.name)}/</span></li>'
+                )
+    work_html = (
+        "<ul class=\"file-list\">\n" + "\n".join(work_items) + "\n</ul>"
+        if work_items
+        else '<p class="hint">No trajectory dirs under <code>reports/work/treatment_luna/</code>.</p>'
+    )
+
+    return f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>{_esc(title)} · DSM-AE</title>
+<style>{_shared_shell_css()}</style>
+</head>
+<body data-configured-base="{_esc(configured_base)}">
+  <h1>Treatment</h1>
+  <p class="meta">Registered intervention arms and completed trial results.</p>
+  {nav}
+
+  <div class="panel">
+    <h2>Registered treatments</h2>
+    <table>
+      <thead><tr><th>ID</th><th>Name</th><th>Description</th></tr></thead>
+      <tbody>
+        {treatments_table}
+      </tbody>
+    </table>
+  </div>
+
+  <div class="panel">
+    <h2>Trial summary</h2>
+    {summary_html}
+  </div>
+
+  <div class="panel">
+    <h2>Result files</h2>
+    <p class="hint">From <code>reports/treatment/</code> (static download via /reports/…).</p>
+    <table>
+      <thead><tr><th>Model</th><th>Arm</th><th>Links</th><th>Path</th></tr></thead>
+      <tbody>
+        {files_table}
+      </tbody>
+    </table>
+  </div>
+
+  <div class="panel">
+    <h2>Trajectory work dirs</h2>
+    {work_html}
+  </div>
+
+  <div class="panel">
+    <h2>How to run</h2>
+    <p class="meta">CLI only for now — this page is a read-only dashboard.</p>
+    <ul class="file-list">
+      <li>Single arm:
+        <code class="help-cmd">dsm-ae diagnose -m &lt;model&gt; --treatment &lt;id&gt; …</code>
+        where <code>&lt;id&gt;</code> is one of
+        <code>prompt_reminder</code>, <code>skill_scaffold</code>,
+        <code>expert_oversight</code> (omit for baseline).
+      </li>
+      <li>Luna multi-arm trial script:
+        <code class="help-cmd">scripts/run_treatment_luna_trial.sh</code>
+        (writes <code>reports/treatment/</code> +
+        <code>reports/work/treatment_luna/</code>).
+      </li>
+    </ul>
+  </div>
+  {_nav_base_script()}
+</body>
+</html>
+"""
+
+
+def render_reports_page(href: Href, reports_dir: Path | str, title: str = "Reports") -> str:
+    """App chrome + directory index of key report areas (static files stay at /reports/)."""
+    reports_dir = Path(reports_dir)
+    configured_base = _configured_base(href)
+    nav = render_nav(href, active="/reports-ui")
+
+    sections: list[tuple[str, str, str]] = [
+        ("Comparison matrix", "/matrix", "In-app matrix shell"),
+        ("Full static tree", "/reports/", "Raw StaticFiles listing / index.html"),
+        ("Queue job reports", "/reports/queue/", "Per-job JSON/MD from the eval queue"),
+        ("Treatment results", "/reports/treatment/", "Treatment trial outputs"),
+        ("Full-suite reports", "/reports/full-suite/", "Full pack-suite diagnosis runs"),
+        ("Work / trajectories", "/reports/work/", "Workspace + trajectory artifacts"),
+    ]
+    section_items = []
+    for label, path, note in sections:
+        section_items.append(
+            f'<li><a href="{href(path)}" data-static="{_esc(path)}"><strong>{_esc(label)}</strong></a>'
+            f' — <code>{_esc(path)}</code>'
+            f' <span class="hint">{_esc(note)}</span></li>'
+        )
+
+    # Highlight a few top-level report files if present
+    top_files: list[str] = []
+    if reports_dir.is_dir():
+        for name in (
+            "dsm-ae-matrix.html",
+            "index.html",
+            "COMPARISON.md",
+            "COVERAGE.md",
+        ):
+            p = reports_dir / name
+            if p.is_file():
+                rel = f"/reports/{name}"
+                top_files.append(
+                    f'<li><a href="{href(rel)}" data-static="{_esc(rel)}">'
+                    f"<code>{_esc(name)}</code></a></li>"
+                )
+        # Also list treatment SUMMARY if present
+        if (reports_dir / "treatment" / "SUMMARY.md").is_file():
+            rel = "/reports/treatment/SUMMARY.md"
+            top_files.append(
+                f'<li><a href="{href(rel)}" data-static="{_esc(rel)}">'
+                f"<code>treatment/SUMMARY.md</code></a></li>"
+            )
+
+    top_html = (
+        "<ul class=\"file-list\">\n" + "\n".join(top_files) + "\n</ul>"
+        if top_files
+        else '<p class="hint">No top-level report files found yet.</p>'
+    )
+
+    # Subdirectory overview (shallow count — work/ trees can be huge)
+    dir_rows: list[str] = []
+    if reports_dir.is_dir():
+        for d in sorted(reports_dir.iterdir()):
+            if not d.is_dir() or d.name.startswith("."):
+                continue
+            try:
+                n_entries = sum(1 for _ in d.iterdir())
+            except OSError:
+                n_entries = 0
+            rel = f"/reports/{d.name}/"
+            dir_rows.append(
+                "<tr>"
+                f'<td><a href="{href(rel)}" data-static="{_esc(rel)}"><code>{_esc(d.name)}/</code></a></td>'
+                f"<td>{n_entries}</td>"
+                f"<td><code>reports/{_esc(d.name)}/</code></td>"
+                "</tr>"
+            )
+    dirs_table = (
+        "\n".join(dir_rows)
+        if dir_rows
+        else '<tr><td colspan="3" class="hint">No report subdirectories</td></tr>'
+    )
+
+    return f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>{_esc(title)} · DSM-AE</title>
+<style>{_shared_shell_css()}</style>
+</head>
+<body data-configured-base="{_esc(configured_base)}">
+  <h1>Reports</h1>
+  <p class="meta">Browse diagnosis outputs with app navigation. Downloads stay at
+     <code>/reports/…</code>.</p>
+  {nav}
+
+  <div class="panel">
+    <h2>Quick links</h2>
+    <ul class="file-list">
+      {"".join(section_items)}
+    </ul>
+  </div>
+
+  <div class="panel">
+    <h2>Featured files</h2>
+    {top_html}
+  </div>
+
+  <div class="panel">
+    <h2>Report directories</h2>
+    <table>
+      <thead><tr><th>Directory</th><th>Entries</th><th>Path</th></tr></thead>
+      <tbody>
+        {dirs_table}
+      </tbody>
+    </table>
+  </div>
+  {_nav_base_script()}
+</body>
+</html>
+"""
+
+
+def render_comparison_page(href: Href, reports_dir: Path | str, title: str = "Comparison") -> str:
+    """App chrome + iframe embedding the static matrix HTML.
+
+    The iframe is height-matched to its document so the parent page is the only
+    vertical scroller (no nested iframe scrollbar).
+    """
+    reports_dir = Path(reports_dir)
+    configured_base = _configured_base(href)
+    nav = render_nav(href, active="/matrix")
+
+    matrix = reports_dir / "dsm-ae-matrix.html"
+    index = reports_dir / "index.html"
+    if matrix.is_file():
+        embed_path = "/reports/dsm-ae-matrix.html"
+        note = "Comparison matrix"
+    elif index.is_file():
+        embed_path = "/reports/index.html"
+        note = "Matrix not built yet — showing reports index"
+    else:
+        embed_path = ""
+        note = "No matrix HTML yet — run a successful job first"
+
+    if embed_path:
+        body_main = f"""
+  <p class="meta">{_esc(note)}.
+    <a href="{href(embed_path)}" data-static="{_esc(embed_path)}" target="_blank" rel="noopener">Open full page</a>
+  </p>
+  <div class="iframe-wrap">
+    <iframe id="matrix-frame" src="{href(embed_path)}"
+            title="DSM-AE comparison matrix" scrolling="no"
+            loading="eager"></iframe>
+  </div>
+  <script>
+  (function () {{
+    const iframe = document.getElementById("matrix-frame");
+    if (!iframe) return;
+
+    function contentHeight(doc) {{
+      const b = doc.body;
+      const e = doc.documentElement;
+      if (!b || !e) return 0;
+      return Math.max(
+        b.scrollHeight, b.offsetHeight,
+        e.scrollHeight, e.offsetHeight, e.clientHeight
+      );
+    }}
+
+    function resize() {{
+      try {{
+        const doc = iframe.contentDocument || iframe.contentWindow.document;
+        if (!doc) return;
+        // Tell embedded report it is in-app (flush padding / no panel max-height).
+        try {{ doc.documentElement.classList.add("embedded-in-shell"); }} catch (e) {{}}
+        const h = contentHeight(doc);
+        if (h > 0) iframe.style.height = h + "px";
+      }} catch (e) {{
+        /* cross-origin would fail; same-origin static reports work */
+      }}
+    }}
+
+    iframe.addEventListener("load", function () {{
+      resize();
+      try {{
+        const doc = iframe.contentDocument || iframe.contentWindow.document;
+        if (doc && doc.body && typeof ResizeObserver !== "undefined") {{
+          const ro = new ResizeObserver(function () {{ resize(); }});
+          ro.observe(doc.body);
+          if (doc.documentElement) ro.observe(doc.documentElement);
+        }}
+        // Mermaid / late layout
+        setTimeout(resize, 300);
+        setTimeout(resize, 1200);
+        setTimeout(resize, 3000);
+      }} catch (e) {{}}
+    }});
+
+    window.addEventListener("resize", resize);
+  }})();
+  </script>
+"""
+    else:
+        body_main = f"""
+  <div class="panel">
+    <p>{_esc(note)}</p>
+    <p class="hint">After a queue job succeeds, the worker rebuilds
+       <code>reports/dsm-ae-matrix.html</code>.</p>
+  </div>
+"""
+
+    return f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>{_esc(title)} · DSM-AE</title>
+<style>{_shared_shell_css()}</style>
+</head>
+<body class="comparison-page" data-configured-base="{_esc(configured_base)}">
+  <h1>Comparison</h1>
+  {nav}
+  {body_main}
+  {_nav_base_script()}
+</body>
+</html>
+"""
+

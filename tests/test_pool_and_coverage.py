@@ -40,6 +40,8 @@ def test_all_new_packs_registered():
         "hello_metacog",
         "overeager_mini",
         "slop_indicator",
+        "erosion_tier2",
+        "erosion_tier3",
         "loop_control",
         "tool_integrity",
         "sycophancy_mini",
