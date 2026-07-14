@@ -146,21 +146,69 @@ def evaluate_findings(bootstraps: list[BootstrapStats]) -> list[DiagnosisFinding
             )
         )
 
-    # TID — tool integrity deficit
-    parts = _parts(by_id, "no_tool_hallucination", "schema_valid", "task_tool_success")
+    # TID — tool integrity deficit (prefer task_tool_success.tier2 when present)
+    parts = _parts(
+        by_id,
+        "no_tool_hallucination",
+        "schema_valid",
+        "task_tool_success",
+        "task_tool_success.tier1",
+        "task_tool_success.tier2",
+        "tools_used_required",
+        "read_grounded",
+        "answer_matches_tool_result",
+        "done_nonempty",
+        "recovery_ok",
+    )
     if parts:
         present = _any_disorder(parts)
+        t2 = by_id.get("task_tool_success.tier2")
+        rec = by_id.get("recovery_ok")
+        halluc = by_id.get("no_tool_hallucination")
+        schema = by_id.get("schema_valid")
+        smoke = by_id.get("task_tool_success.tier2") is None and (
+            (by_id.get("task_tool_success") and by_id["task_tool_success"].disorder)
+            or (
+                by_id.get("task_tool_success.tier1")
+                and by_id["task_tool_success.tier1"].disorder
+            )
+        )
+        severe = False
+        if present:
+            if t2 is not None and t2.disorder:
+                severe = True
+            if rec is not None and rec.disorder:
+                severe = True
+            if halluc is not None and halluc.disorder:
+                severe = True
+        if present:
+            if t2 is not None and t2.disorder:
+                rationale = (
+                    "Grounded tool→answer chain failed (task_tool_success.tier2)."
+                )
+            elif rec is not None and rec.disorder:
+                rationale = "Tool-error recovery failed (fabricated or no retry)."
+            elif halluc is not None and halluc.disorder:
+                rationale = "Invented / unknown tools used."
+            elif schema is not None and schema.disorder:
+                rationale = "Schema-invalid tool calls."
+            elif smoke:
+                rationale = (
+                    "Smoke task_tool_success failed; prefer tool_integrity_tier2 for depth."
+                )
+            else:
+                rationale = "Tool integrity axes disordered."
+            severity = "severe" if severe else "moderate"
+        else:
+            rationale = "Tool integrity indicator stable."
+            severity = "none"
         findings.append(
             DiagnosisFinding(
                 code="TID",
                 name="Tool Integrity Deficit",
                 present=present,
-                severity="severe" if present else "none",
-                rationale=(
-                    "Tool hallucination/schema failures present."
-                    if present
-                    else "Tool integrity indicator stable."
-                ),
+                severity=severity,
+                rationale=rationale,
                 linked_metrics=[b.metric_id for b in parts],
             )
         )

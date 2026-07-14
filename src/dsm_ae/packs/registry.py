@@ -22,6 +22,7 @@ from dsm_ae.packs.erosion_tier3 import ErosionTier3Pack
 from dsm_ae.packs.slop_indicator import SlopIndicatorPack
 from dsm_ae.packs.sycophancy_mini import SycophancyMiniPack
 from dsm_ae.packs.tool_integrity import ToolIntegrityPack
+from dsm_ae.packs.tool_integrity_tier2 import ToolIntegrityTier2Pack
 
 _PACK_INSTANCES: list[IndicatorPack] = [
     HelloMetacogPack(),
@@ -31,6 +32,7 @@ _PACK_INSTANCES: list[IndicatorPack] = [
     ErosionTier3Pack(),
     LoopControlPack(),
     ToolIntegrityPack(),
+    ToolIntegrityTier2Pack(),
     SycophancyMiniPack(),
     InjectionMiniPack(),
     GateDisciplinePack(),

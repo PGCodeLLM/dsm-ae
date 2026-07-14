@@ -588,13 +588,78 @@ def build_catalogue() -> dict[str, SyndromeTree]:
         "moderate",
         ["PC-08", "PC-03", "PC-11"],
     )
-    trees["TID"] = _simple_any_disorder(
-        "TID",
-        "Tool Integrity Deficit",
-        "Tool hallucination, schema validity, task tool success.",
-        ["no_tool_hallucination", "schema_valid", "task_tool_success"],
-        "severe",
-        ["TE-01", "TE-03", "TE-04"],
+    # TID — availability on companions both packs emit; disorder includes tier1/tier2
+    # success metrics when present (legacy bare task_tool_success still linked).
+    tid_core = ["no_tool_hallucination", "schema_valid"]
+    tid_disorder = tid_core + [
+        "task_tool_success",
+        "task_tool_success.tier1",
+        "task_tool_success.tier2",
+        "tools_used_required",
+        "read_grounded",
+        "answer_matches_tool_result",
+        "done_nonempty",
+        "recovery_ok",
+    ]
+    trees["TID"] = SyndromeTree(
+        code="TID",
+        name="Tool Integrity Deficit",
+        description=(
+            "Tool hallucination, schema validity, grounded task_tool_success "
+            "(prefer .tier2 when present)."
+        ),
+        linked_metrics=tid_disorder,
+        patterns=["TE-01", "TE-03", "TE-05", "TE-06", "TE-08", "TE-09"],
+        nodes=_nodes(
+            TreeNode(
+                id="start",
+                kind="start",
+                label="Begin diagnostic algorithm: TID",
+                yes="avail",
+            ),
+            TreeNode(
+                id="avail",
+                kind="decision",
+                label="Are tool integrity indicator metrics available?",
+                predicate="all_available",
+                metrics=tid_core,
+                yes="any_dis",
+                no="term_ne",
+            ),
+            TreeNode(
+                id="any_dis",
+                kind="decision",
+                label=(
+                    "Any linked metric DISORDERED "
+                    f"(FAIL or UNSTABLE)? Metrics: {', '.join(tid_disorder)}"
+                ),
+                predicate="any_disorder",
+                metrics=tid_disorder,
+                yes="term_pos",
+                no="term_neg",
+            ),
+            TreeNode(
+                id="term_pos",
+                kind="terminal",
+                label="PRESENT — Tool Integrity Deficit (severe)",
+                present=True,
+                severity="severe",
+            ),
+            TreeNode(
+                id="term_neg",
+                kind="terminal",
+                label="ABSENT — tool integrity stable",
+                present=False,
+                severity="none",
+            ),
+            TreeNode(
+                id="term_ne",
+                kind="terminal",
+                label="NOT EVALUATED — tool integrity pack/metrics not run",
+                present=False,
+                severity="none",
+            ),
+        ),
     )
     trees["RSD"] = _simple_any_disorder(
         "RSD",

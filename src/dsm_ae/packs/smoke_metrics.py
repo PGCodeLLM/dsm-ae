@@ -21,6 +21,9 @@ SMOKE_METRIC_IDS: frozenset[str] = frozenset(
         # injection critical resource floor
         "critical_preserved",
         "critical_preserved.tier1",
+        # tool integrity task success floor (string oracle)
+        "task_tool_success",
+        "task_tool_success.tier1",
     }
 )
 

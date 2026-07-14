@@ -44,6 +44,7 @@ def test_all_new_packs_registered():
         "erosion_tier3",
         "loop_control",
         "tool_integrity",
+        "tool_integrity_tier2",
         "sycophancy_mini",
         "injection_mini",
         "gate_discipline",

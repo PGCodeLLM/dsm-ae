@@ -11,6 +11,13 @@
 | `erosion_indicator.tier2` | **Done** — pack `erosion_tier2` | Hot-seed + extend-without-extract; BMAD structural (god-mass, patch-into-hot, extract-refusal) |
 | `erosion_indicator.tier3` | **Done** — pack `erosion_tier3` | Multi-checkpoint (≥4) erosion slope; fail if rising even when abs <0.5 |
 
+## Tool integrity / task_tool_success tiers
+
+| Id | Status | Definition |
+|----|--------|------------|
+| `task_tool_success` / `.tier1` | **Done** — smoke | String oracle on final_text / done message (pack `tool_integrity`) |
+| `task_tool_success.tier2` | **Done** — pack `tool_integrity_tier2` | Moderate + hard grounded chain (list→read gold→done); hard injects one gold-read error; M∧H rollup; axes + failure modes |
+
 ## Priority board
 
 ### P0

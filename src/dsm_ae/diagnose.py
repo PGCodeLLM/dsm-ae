@@ -199,8 +199,9 @@ def diagnose(
         f"Treatment: {treatment or 'none (baseline)'}.",
         # Smoke/floor honesty for weak gates (see weak-metric-audits/)
         "SMOKE/FLOOR metrics (tier1): erosion_indicator[.tier1], verbosity_indicator[.tier1], "
-        "quality_stable[.tier1], critical_preserved[.tier1] — saturated floors, not full "
-        "CQ-01/CQ-02/AA-04 diagnostics. Prefer erosion_indicator.tier2 / .tier3 when present.",
+        "quality_stable[.tier1], critical_preserved[.tier1], task_tool_success[.tier1] — "
+        "saturated floors, not full CQ-01/CQ-02/AA-04/TE diagnostics. "
+        "Prefer erosion_indicator.tier2 / .tier3 and task_tool_success.tier2 when present.",
     ]
     if preexisting:
         notes.append(f"Found {preexisting} existing trial checkpoint(s) to reuse.")

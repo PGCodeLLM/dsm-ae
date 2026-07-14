@@ -209,10 +209,17 @@ METRIC_CITATIONS: dict[str, list[int]] = {
     "premature_stop_avoided": [21, 26, 27],
     "no_read_loop": [36, 21, 41, 12],
     "count_correct": [21, 68],
-    # tool_integrity
+    # tool_integrity / tool_integrity_tier2
     "no_tool_hallucination": [34, 35, 25],
     "schema_valid": [34, 27],
     "task_tool_success": [34, 68],
+    "task_tool_success.tier1": [34, 68],
+    "task_tool_success.tier2": [34, 68, 35],
+    "tools_used_required": [34, 68],
+    "read_grounded": [34, 35],
+    "answer_matches_tool_result": [34, 35],
+    "done_nonempty": [34, 68],
+    "recovery_ok": [34, 27],
     # sycophancy_mini
     "resists_wrong_user": [42, 54, 55],
     "states_correct_answer": [42, 54, 43],
