@@ -135,6 +135,7 @@ def diagnose(
     client_extra: dict[str, Any] | None = None,
     resume: bool | None = None,
     treatment: str | None = None,
+    context_bloat: float | dict[str, Any] | None = None,
 ) -> DiagnosisReport:
     """Run packs×k trials and build a DiagnosisReport.
 
@@ -147,9 +148,21 @@ def diagnose(
     treatment:
         Optional treatment id (e.g. ``prompt_reminder``) to wrap the adapter and
         inject system/user prompt interventions before each pack trial.
+    context_bloat:
+        Optional bloated-context fill level (0.5 / 0.8) or config dict. Results
+        should be written under a separate tree (e.g. reports/bloat/) by callers.
     """
     packs = packs or list_packs()
     inferred_rpm = _infer_rpm(models_yaml, model, rpm)
+    bloat_cfg_raw: dict[str, Any] | None
+    if context_bloat is None:
+        bloat_cfg_raw = None
+    elif isinstance(context_bloat, (int, float)):
+        bloat_cfg_raw = {"level": float(context_bloat), "model": model}
+    else:
+        bloat_cfg_raw = dict(context_bloat)
+        bloat_cfg_raw.setdefault("model", model)
+
     card = ScaffoldCard(
         model=model,
         scaffold=scaffold,
@@ -162,15 +175,21 @@ def diagnose(
             "concurrency": concurrency,
             "rpm": inferred_rpm,
             "treatment": treatment,
+            "context_bloat": bloat_cfg_raw,
         },
     )
+    # Strip non-LiteLLM keys from client_extra
+    litellm_extra = dict(client_extra or {})
+    for k_drop in ("context_bloat", "treatment", "label", "bloat_level"):
+        litellm_extra.pop(k_drop, None)
+
     raw_client: ModelClient = make_client(
         model,
         mock_persona=mock_persona,
         models_yaml=models_yaml,
         api_base=api_base,
         api_key=api_key,
-        extra=client_extra,
+        extra=litellm_extra or None,
     )
     client: ModelClient = (
         LockedClient(raw_client) if concurrency and concurrency > 1 else raw_client
@@ -181,6 +200,13 @@ def diagnose(
 
         t = get_treatment(treatment)
         adapter = TreatedAdapter(adapter, t)
+    if bloat_cfg_raw:
+        from dsm_ae.context_bloat import ContextBloatConfig, ContextBloatedAdapter
+
+        bcfg = ContextBloatConfig.from_dict(bloat_cfg_raw)
+        if bcfg and bcfg.enabled():
+            bcfg.model = model
+            adapter = ContextBloatedAdapter(adapter, bcfg, models_yaml=models_yaml)
 
     root = Path(work_dir) if work_dir else Path(tempfile.mkdtemp(prefix="dsm_ae_"))
     root.mkdir(parents=True, exist_ok=True)
@@ -197,6 +223,7 @@ def diagnose(
         f"Resume={do_resume} (checkpoints under {CHECKPOINT_DIRNAME}/).",
         f"Trajectories + LiteLLM JSONL under {TRAJECTORIES_DIRNAME}/.",
         f"Treatment: {treatment or 'none (baseline)'}.",
+        f"Context bloat: {bloat_cfg_raw if bloat_cfg_raw else 'none (0% fill)'}.",
         # Smoke/floor honesty for weak gates (see weak-metric-audits/)
         "SMOKE/FLOOR metrics (tier1): erosion_indicator[.tier1], verbosity_indicator[.tier1], "
         "quality_stable[.tier1], critical_preserved[.tier1], task_tool_success[.tier1] — "

@@ -94,6 +94,22 @@ def _shared_shell_css() -> str:
     width: 100%; height: auto; min-height: 200px;
     border: 0; display: block; vertical-align: top;
   }
+  /* Sub-tabs under Comparison: Multi-model | Context Bloat */
+  .subtabs {
+    display: flex; flex-wrap: wrap; gap: 6px;
+    margin: 0 0 10px; padding: 0;
+  }
+  .subtabs button {
+    appearance: none; border: 1px solid #ccc; background: #fff;
+    color: #333; font: inherit; font-size: 13px;
+    padding: 5px 12px; border-radius: 6px; cursor: pointer;
+  }
+  .subtabs button:hover { border-color: #1565c0; color: #1565c0; }
+  .subtabs button.active {
+    background: #e3f2fd; border-color: #1565c0; color: #0d47a1; font-weight: 600;
+  }
+  .tab-panel { display: none; }
+  .tab-panel.active { display: block; }
   .help-cmd { background: #f0f4f8; padding: 2px 6px; border-radius: 3px; }
 """
 
@@ -1091,9 +1107,13 @@ def render_reports_page(href: Href, reports_dir: Path | str, title: str = "Repor
 
 
 def render_comparison_page(href: Href, reports_dir: Path | str, title: str = "Comparison") -> str:
-    """App chrome + iframe embedding the static matrix HTML.
+    """App chrome + tabbed iframes for multi-model matrix and Context Bloat.
 
-    The iframe is height-matched to its document so the parent page is the only
+    Tabs:
+      Multi-model — classic cross-model matrix (``dsm-ae-matrix.html``)
+      Context Bloat — baseline vs 50% fill for models with bloat50 runs
+
+    Each iframe is height-matched to its document so the parent page is the only
     vertical scroller (no nested iframe scrollbar).
     """
     reports_dir = Path(reports_dir)
@@ -1103,30 +1123,90 @@ def render_comparison_page(href: Href, reports_dir: Path | str, title: str = "Co
     matrix = reports_dir / "dsm-ae-matrix.html"
     index = reports_dir / "index.html"
     if matrix.is_file():
-        embed_path = "/reports/dsm-ae-matrix.html"
-        note = "Comparison matrix"
+        baseline_path = "/reports/dsm-ae-matrix.html"
+        baseline_note = "Cross-model matrix (all baseline / suite reports)"
     elif index.is_file():
-        embed_path = "/reports/index.html"
-        note = "Matrix not built yet — showing reports index"
+        baseline_path = "/reports/index.html"
+        baseline_note = "Matrix not built yet — showing reports index"
     else:
-        embed_path = ""
-        note = "No matrix HTML yet — run a successful job first"
+        baseline_path = ""
+        baseline_note = "No matrix HTML yet — run a successful job first"
 
-    if embed_path:
-        body_main = f"""
-  <p class="meta">{_esc(note)}.
-    <a href="{href(embed_path)}" data-static="{_esc(embed_path)}" target="_blank" rel="noopener">Open full page</a>
-  </p>
-  <div class="iframe-wrap">
-    <iframe id="matrix-frame" src="{href(embed_path)}"
-            title="DSM-AE comparison matrix" scrolling="no"
-            loading="eager"></iframe>
+    bloat_html = reports_dir / "bloat" / "bloat50" / "comparison.html"
+    if bloat_html.is_file():
+        bloat_path = "/reports/bloat/bloat50/comparison.html"
+        bloat_note = (
+            "Baseline vs context bloat 50% — metrics from packs with complete "
+            "bloat checkpoints (excludes incomplete tool_integrity_tier2 until done)"
+        )
+    else:
+        bloat_path = ""
+        bloat_note = (
+            "Context Bloat matrix not built yet — run "
+            "<code>python scripts/build_bloat_comparison.py</code> after bloat50 jobs"
+        )
+
+    def _iframe_panel(
+        panel_id: str,
+        active: bool,
+        note: str,
+        embed_path: str,
+        iframe_id: str,
+        iframe_title: str,
+        open_label: str,
+    ) -> str:
+        act = " active" if active else ""
+        if embed_path:
+            return f"""
+  <div class="tab-panel{act}" id="{_esc(panel_id)}" data-panel="{_esc(panel_id)}">
+    <p class="meta">{note}.
+      <a href="{href(embed_path)}" data-static="{_esc(embed_path)}" target="_blank" rel="noopener">{_esc(open_label)}</a>
+    </p>
+    <div class="iframe-wrap">
+      <iframe id="{_esc(iframe_id)}" class="matrix-frame" src="{href(embed_path)}"
+              title="{_esc(iframe_title)}" scrolling="no"
+              loading="{'eager' if active else 'lazy'}"></iframe>
+    </div>
   </div>
+"""
+        return f"""
+  <div class="tab-panel{act}" id="{_esc(panel_id)}" data-panel="{_esc(panel_id)}">
+    <div class="panel">
+      <p>{note}</p>
+    </div>
+  </div>
+"""
+
+    baseline_panel = _iframe_panel(
+        "tab-baseline",
+        True,
+        baseline_note,
+        baseline_path,
+        "matrix-frame-baseline",
+        "DSM-AE multi-model matrix",
+        "Open full page",
+    )
+    bloat_panel = _iframe_panel(
+        "tab-bloat",
+        False,
+        bloat_note,
+        bloat_path,
+        "matrix-frame-bloat",
+        "Context Bloat baseline vs 50%",
+        "Open full page",
+    )
+
+    body_main = f"""
+  <div class="subtabs" role="tablist" aria-label="Comparison views">
+    <button type="button" role="tab" data-tab="tab-baseline" class="active"
+            aria-selected="true">Multi-model</button>
+    <button type="button" role="tab" data-tab="tab-bloat"
+            aria-selected="false">Context Bloat</button>
+  </div>
+  {baseline_panel}
+  {bloat_panel}
   <script>
   (function () {{
-    const iframe = document.getElementById("matrix-frame");
-    if (!iframe) return;
-
     function contentHeight(doc) {{
       const b = doc.body;
       const e = doc.documentElement;
@@ -1137,46 +1217,80 @@ def render_comparison_page(href: Href, reports_dir: Path | str, title: str = "Co
       );
     }}
 
-    function resize() {{
-      try {{
-        const doc = iframe.contentDocument || iframe.contentWindow.document;
-        if (!doc) return;
-        // Tell embedded report it is in-app (flush padding / no panel max-height).
-        try {{ doc.documentElement.classList.add("embedded-in-shell"); }} catch (e) {{}}
-        const h = contentHeight(doc);
-        if (h > 0) iframe.style.height = h + "px";
-      }} catch (e) {{
-        /* cross-origin would fail; same-origin static reports work */
+    function wireFrame(iframe) {{
+      if (!iframe) return;
+      function resize() {{
+        try {{
+          const doc = iframe.contentDocument || iframe.contentWindow.document;
+          if (!doc) return;
+          try {{ doc.documentElement.classList.add("embedded-in-shell"); }} catch (e) {{}}
+          const h = contentHeight(doc);
+          if (h > 0) iframe.style.height = h + "px";
+        }} catch (e) {{}}
       }}
+      iframe.addEventListener("load", function () {{
+        resize();
+        try {{
+          const doc = iframe.contentDocument || iframe.contentWindow.document;
+          if (doc && doc.body && typeof ResizeObserver !== "undefined") {{
+            const ro = new ResizeObserver(function () {{ resize(); }});
+            ro.observe(doc.body);
+            if (doc.documentElement) ro.observe(doc.documentElement);
+          }}
+          setTimeout(resize, 300);
+          setTimeout(resize, 1200);
+          setTimeout(resize, 3000);
+        }} catch (e) {{}}
+      }});
+      window.addEventListener("resize", resize);
+      iframe._dsmResize = resize;
     }}
 
-    iframe.addEventListener("load", function () {{
-      resize();
-      try {{
-        const doc = iframe.contentDocument || iframe.contentWindow.document;
-        if (doc && doc.body && typeof ResizeObserver !== "undefined") {{
-          const ro = new ResizeObserver(function () {{ resize(); }});
-          ro.observe(doc.body);
-          if (doc.documentElement) ro.observe(doc.documentElement);
-        }}
-        // Mermaid / late layout
-        setTimeout(resize, 300);
-        setTimeout(resize, 1200);
-        setTimeout(resize, 3000);
-      }} catch (e) {{}}
+    document.querySelectorAll("iframe.matrix-frame").forEach(wireFrame);
+
+    window.addEventListener("message", function (ev) {{
+      if (ev.origin !== window.location.origin) return;
+      if (ev.data && ev.data.type === "dsm-ae-matrix-resize") {{
+        document.querySelectorAll("iframe.matrix-frame").forEach(function (f) {{
+          if (f._dsmResize) f._dsmResize();
+        }});
+      }}
     }});
 
-    window.addEventListener("resize", resize);
+    const tabs = document.querySelectorAll(".subtabs [data-tab]");
+    const panels = document.querySelectorAll(".tab-panel");
+    function activate(id) {{
+      tabs.forEach(function (btn) {{
+        const on = btn.getAttribute("data-tab") === id;
+        btn.classList.toggle("active", on);
+        btn.setAttribute("aria-selected", on ? "true" : "false");
+      }});
+      panels.forEach(function (p) {{
+        p.classList.toggle("active", p.id === id);
+      }});
+      const panel = document.getElementById(id);
+      if (panel) {{
+        panel.querySelectorAll("iframe.matrix-frame").forEach(function (f) {{
+          if (f._dsmResize) setTimeout(f._dsmResize, 50);
+        }});
+      }}
+      try {{
+        const u = new URL(window.location.href);
+        u.searchParams.set("tab", id === "tab-bloat" ? "bloat" : "baseline");
+        history.replaceState(null, "", u.pathname + u.search + u.hash);
+      }} catch (e) {{}}
+    }}
+    tabs.forEach(function (btn) {{
+      btn.addEventListener("click", function () {{
+        activate(btn.getAttribute("data-tab"));
+      }});
+    }});
+    try {{
+      const q = new URLSearchParams(window.location.search).get("tab");
+      if (q === "bloat") activate("tab-bloat");
+    }} catch (e) {{}}
   }})();
   </script>
-"""
-    else:
-        body_main = f"""
-  <div class="panel">
-    <p>{_esc(note)}</p>
-    <p class="hint">After a queue job succeeds, the worker rebuilds
-       <code>reports/dsm-ae-matrix.html</code>.</p>
-  </div>
 """
 
     return f"""<!DOCTYPE html>

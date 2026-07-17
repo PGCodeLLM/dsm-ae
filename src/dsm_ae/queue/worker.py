@@ -92,6 +92,33 @@ def run_one(
         },
     )
     try:
+        extra = dict(job.extra or {})
+        # Bloated-context Axis V condition (separate results tree when set).
+        context_bloat = extra.pop("context_bloat", None)
+        if context_bloat is None and extra.get("bloat_level") is not None:
+            context_bloat = float(extra.pop("bloat_level"))
+        treatment = extra.pop("treatment", None)
+        # Remaining extra → LiteLLM client params only
+        client_extra = extra or None
+
+        # Default bloat outputs under reports/bloat/ so they never mix with baseline.
+        if context_bloat is not None:
+            level = (
+                float(context_bloat)
+                if isinstance(context_bloat, (int, float))
+                else float((context_bloat or {}).get("level") or 0.5)
+            )
+            bloat_tag = f"bloat{int(round(level * 100))}"
+            bloat_root = reports_dir / "bloat" / bloat_tag
+            if not job.work_dir:
+                work = bloat_root / "work" / job.id[:8]
+                work.mkdir(parents=True, exist_ok=True)
+                store.update_paths(job.id, work_dir=str(work))
+            if not job.out_md:
+                md_path = bloat_root / f"{job.model}-{job.id[:8]}.md"
+            if not job.out_json:
+                json_path = bloat_root / f"{job.model}-{job.id[:8]}.json"
+
         report = diagnose(
             model=job.model,
             packs=job.packs,
@@ -104,9 +131,11 @@ def run_one(
             api_key=api_key,
             work_dir=work,
             on_progress=on_progress,
-            client_extra=job.extra,
+            client_extra=client_extra,
             # Always resume when work_dir has .dsm_ae_ckpt/* from a prior attempt.
             resume=True,
+            treatment=treatment if isinstance(treatment, str) else None,
+            context_bloat=context_bloat,
         )
         md_path.parent.mkdir(parents=True, exist_ok=True)
         md_path.write_text(render_markdown(report), encoding="utf-8")
@@ -276,9 +305,50 @@ def _rebuild_matrix(
                 written.append(str(mirror))
             except OSError as e:
                 print(f"matrix mirror to index.html failed: {e}", file=sys.stderr)
+        # Context Bloat Comparison tab (baseline vs 50%) when bloat50 work exists.
+        bloat_html = _rebuild_bloat_comparison(reports_dir)
+        if bloat_html:
+            written.append(bloat_html)
         print(f"Rebuilt matrix → {', '.join(written)}", flush=True)
         return True, written
     except Exception as e:
         print(f"HTML matrix rebuild failed (non-fatal): {e}", file=sys.stderr)
         traceback.print_exc(file=sys.stderr)
         return False, written
+
+
+def _rebuild_bloat_comparison(reports_dir: Path) -> str | None:
+    """Rebuild reports/bloat/bloat50/comparison.html if work trees exist."""
+    bloat_work = reports_dir / "bloat" / "bloat50" / "work"
+    if not bloat_work.is_dir():
+        return None
+    try:
+        script = (
+            Path(__file__).resolve().parents[3]
+            / "scripts"
+            / "build_bloat_comparison.py"
+        )
+        if not script.is_file():
+            script = Path.cwd() / "scripts" / "build_bloat_comparison.py"
+        if not script.is_file():
+            return None
+        sys.path.insert(0, str(script.parent))
+        from build_bloat_comparison import main as bloat_main  # type: ignore
+
+        rc = bloat_main(
+            [
+                "--reports-dir",
+                str(reports_dir),
+                "--models",
+                "gpt-5.5,gpt-5.6-sol",
+            ]
+        )
+        out = reports_dir / "bloat" / "bloat50" / "comparison.html"
+        if rc == 0 and out.is_file():
+            print(f"Rebuilt bloat comparison → {out}", flush=True)
+            return str(out)
+        return None
+    except Exception as e:
+        print(f"bloat comparison rebuild failed (non-fatal): {e}", file=sys.stderr)
+        traceback.print_exc(file=sys.stderr)
+        return None

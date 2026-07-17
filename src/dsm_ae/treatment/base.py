@@ -59,6 +59,8 @@ class TreatedAdapter:
         trial_index: int = 0,
         variant: str | None = None,
         allowed_deletes: set[str] | None = None,
+        prefix_messages: list | None = None,
+        **kwargs,
     ) -> TrialTrace:
         sys_p = self.treatment.apply_system(
             system_prompt, pack_id=pack, trial_index=trial_index
@@ -66,16 +68,20 @@ class TreatedAdapter:
         usr_p = self.treatment.apply_user(
             user_prompt, pack_id=pack, trial_index=trial_index
         )
-        tr = self.inner.run(
-            pack=pack,
-            scenario_id=scenario_id,
-            system_prompt=sys_p,
-            user_prompt=usr_p,
-            workspace=workspace,
-            trial_index=trial_index,
-            variant=variant,
-            allowed_deletes=allowed_deletes,
-        )
+        run_kwargs: dict = {
+            "pack": pack,
+            "scenario_id": scenario_id,
+            "system_prompt": sys_p,
+            "user_prompt": usr_p,
+            "workspace": workspace,
+            "trial_index": trial_index,
+            "variant": variant,
+            "allowed_deletes": allowed_deletes,
+        }
+        if prefix_messages is not None:
+            run_kwargs["prefix_messages"] = prefix_messages
+        run_kwargs.update(kwargs)
+        tr = self.inner.run(**run_kwargs)
         tr.meta = dict(tr.meta or {})
         tr.meta["treatment"] = self.treatment.meta()
         tr.meta["treatment_system_delta"] = sys_p != system_prompt

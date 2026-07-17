@@ -18,12 +18,14 @@ import argparse
 import html
 import json
 import re
+import statistics
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 try:
+    from dsm_ae.criteria import evaluate_findings
     from dsm_ae.metric_citations import citations_for_metric, references_used
     from dsm_ae.decision_trees import (
         SYNDROME_TREES,
@@ -33,9 +35,12 @@ try:
         gates_from_report_acc,
         tree_to_mermaid,
     )
+    from dsm_ae.metrics.bootstrap import classify_status
+    from dsm_ae.models import BootstrapStats, GateStatus
     from dsm_ae.packs.smoke_metrics import is_smoke_metric
 except ImportError:
     sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+    from dsm_ae.criteria import evaluate_findings
     from dsm_ae.metric_citations import citations_for_metric, references_used
     from dsm_ae.decision_trees import (
         SYNDROME_TREES,
@@ -45,6 +50,8 @@ except ImportError:
         gates_from_report_acc,
         tree_to_mermaid,
     )
+    from dsm_ae.metrics.bootstrap import classify_status
+    from dsm_ae.models import BootstrapStats, GateStatus
     from dsm_ae.packs.smoke_metrics import is_smoke_metric
 
 
@@ -56,6 +63,7 @@ _SKIP_DIR_NAMES = frozenset(
         "trajectories",
         ".dsm_ae_ckpt",
         "progress",
+        "bloat",  # Axis V context-bloat runs — separate Comparison tab
         "__pycache__",
         ".git",
         "node_modules",
@@ -109,50 +117,331 @@ def model_id(report: dict[str, Any]) -> str:
     return str(card.get("model") or report.get("model") or "unknown")
 
 
-def merge_reports(reports: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
-    """Merge multiple JSON runs per model.
+def _obs_from_bootstrap(b: dict[str, Any]) -> list[tuple[float, bool]]:
+    """Extract (value, passed) observations from one bootstrap block."""
+    out: list[tuple[float, bool]] = []
+    pts = b.get("per_trial") or []
+    if isinstance(pts, list) and pts:
+        for pt in pts:
+            if not isinstance(pt, dict):
+                continue
+            try:
+                val = float(pt.get("value") if pt.get("value") is not None else 0.0)
+            except Exception:
+                val = 0.0
+            if "passed" in pt:
+                passed = bool(pt.get("passed"))
+            else:
+                passed = val >= 0.5
+            out.append((val, passed))
+        if out:
+            return out
 
-    Later files override earlier metric/finding/bootstrap cells for the same key;
-    packs are unioned so NOT RUN stays accurate for never-run packs.
+    values = b.get("values") or []
+    if isinstance(values, list) and values:
+        n = len(values)
+        pr = b.get("pass_rate")
+        if pr is not None:
+            try:
+                n_pass = int(round(float(pr) * n))
+            except Exception:
+                n_pass = sum(1 for v in values if float(v) >= 0.5)
+        else:
+            n_pass = sum(1 for v in values if float(v) >= 0.5)
+        # Pair value with a reconstructed pass when per_trial missing.
+        # Prefer binary pass flags matching pass_rate when values are continuous.
+        for i, v in enumerate(values):
+            try:
+                fv = float(v)
+            except Exception:
+                fv = 0.0
+            if all(float(x) in (0.0, 1.0) for x in values if x is not None):
+                passed = fv >= 0.5
+            else:
+                passed = i < n_pass
+            out.append((fv, passed))
+        return out
+
+    # Fall back to n × pass_rate expansion (historic gate-only records).
+    try:
+        n = int(b.get("n") or 0)
+    except Exception:
+        n = 0
+    pr = b.get("pass_rate")
+    if n > 0 and pr is not None:
+        try:
+            n_pass = int(round(float(pr) * n))
+        except Exception:
+            n_pass = 0
+        for i in range(n):
+            passed = i < n_pass
+            out.append((1.0 if passed else 0.0, passed))
+    return out
+
+
+def _obs_from_gate(g: dict[str, Any]) -> list[tuple[float, bool]]:
+    """Last-resort observations from a gate cell alone."""
+    try:
+        n = int(g.get("n") or 0)
+    except Exception:
+        n = 0
+    # Parse n= from explanation when explicit n missing.
+    if n <= 0:
+        expl = str(g.get("explanation") or "")
+        m = re.search(r"\bn=(\d+)\b", expl)
+        if m:
+            n = int(m.group(1))
+    pr = g.get("pass_rate")
+    mean = g.get("mean")
+    if n <= 0 or pr is None:
+        return []
+    try:
+        n_pass = int(round(float(pr) * n))
+    except Exception:
+        return []
+    out: list[tuple[float, bool]] = []
+    for i in range(n):
+        passed = i < n_pass
+        if mean is not None and n_pass == n:
+            try:
+                out.append((float(mean), True))
+                continue
+            except Exception:
+                pass
+        out.append((1.0 if passed else 0.0, passed))
+    return out
+
+
+def _finalize_metric(
+    metric_id: str,
+    *,
+    dimension: str,
+    values: list[float],
+    passes: list[bool],
+    notes: list[str],
+    n_reports: int,
+    threshold_pass: float = 0.8,
+    threshold_std: float = 0.25,
+) -> tuple[dict[str, Any], dict[str, Any], BootstrapStats]:
+    """Build pooled gate + bootstrap dicts + BootstrapStats for criteria."""
+    n = len(passes)
+    pass_rate = statistics.fmean([1.0 if p else 0.0 for p in passes]) if n else 0.0
+    mean = statistics.fmean(values) if values else 0.0
+    # Prefer pass-series std for attunement variance (matches bootstrap_metric).
+    series = [1.0 if p else 0.0 for p in passes]
+    if values and not all(v in (0.0, 1.0) for v in values):
+        series_for_std = values
+    else:
+        series_for_std = series
+    std = statistics.pstdev(series_for_std) if n > 1 else 0.0
+    status = classify_status(
+        pass_rate, std, threshold_pass=threshold_pass, threshold_std=threshold_std
+    )
+    disorder = status in (GateStatus.FAIL, GateStatus.UNSTABLE)
+    note = notes[0] if notes else ""
+    if len(note) > 220:
+        note = note[:217] + "…"
+    summary = (
+        f"n={n} mean={mean:.3f} std={std:.3f} pass_rate={pass_rate:.3f} → {status.value}"
+        f"{' (DISORDER)' if disorder else ' (attuned)'}"
+        f" [pooled from {n_reports} report(s)]"
+        + (f". e.g. {note}" if note else "")
+    )
+    gate = {
+        "metric_id": metric_id,
+        "dimension": dimension,
+        "pass_rate": pass_rate,
+        "mean": mean,
+        "std": std,
+        "n": n,
+        "status": status.value,
+        "disorder": disorder,
+        "explanation": summary,
+        "n_reports": n_reports,
+    }
+    boot = {
+        "metric_id": metric_id,
+        "dimension": dimension,
+        "n": n,
+        "values": values,
+        "mean": mean,
+        "std": std,
+        "pass_rate": pass_rate,
+        "status": status.value,
+        "disorder": disorder,
+        "threshold_pass": threshold_pass,
+        "threshold_std": threshold_std,
+        "summary": summary,
+        "n_reports": n_reports,
+    }
+    stats = BootstrapStats(
+        metric_id=metric_id,
+        dimension=dimension,
+        n=n,
+        values=values,
+        mean=mean,
+        std=std,
+        pass_rate=pass_rate,
+        status=status,
+        disorder=disorder,
+        threshold_pass=threshold_pass,
+        threshold_std=threshold_std,
+        per_trial=[],
+        summary=summary,
+    )
+    return gate, boot, stats
+
+
+def merge_reports(
+    reports: list[dict[str, Any]],
+    *,
+    threshold_pass: float = 0.8,
+    threshold_std: float = 0.25,
+) -> dict[str, dict[str, Any]]:
+    """Merge multiple JSON runs per model by **pooling trial observations**.
+
+    Historic suite reports, queue jobs, and repro-shared ``trial_*.json`` (k=1)
+    are concatenated per metric so tooltip ``n`` is total population size across
+    all recent runs (last ~days of retests included). Variance is recomputed on
+    the pooled series; retest-to-retest drift is intentionally de-emphasized.
+
+    Packs are unioned. Findings are re-derived from pooled bootstraps via
+    ``evaluate_findings`` when possible.
     """
-    by_model: dict[str, dict[str, Any]] = {}
+    # model -> metric_id -> accumulator
+    raw: dict[str, dict[str, Any]] = {}
+    meta: dict[str, dict[str, Any]] = {}
+
     for rep in reports:
         mid = model_id(rep)
-        if mid not in by_model:
-            by_model[mid] = {
+        if mid not in meta:
+            meta[mid] = {
                 "model": mid,
                 "packs": set(),
-                "gates": {},
-                "findings": {},
-                "bootstraps": {},  # metric_id -> bootstrap dict
                 "sources": [],
                 "k_trials": [],
                 "run_ids": [],
             }
-        acc = by_model[mid]
+            raw[mid] = {}
+        acc_m = meta[mid]
         packs = rep.get("packs") or []
         if isinstance(packs, list):
-            acc["packs"].update(packs)
-        acc["sources"].append(rep.get("_source_path", ""))
+            acc_m["packs"].update(packs)
+        acc_m["sources"].append(rep.get("_source_path", ""))
         if rep.get("run_id"):
-            acc["run_ids"].append(rep["run_id"])
+            acc_m["run_ids"].append(rep["run_id"])
         if rep.get("k_trials") is not None:
-            acc["k_trials"].append(rep["k_trials"])
-        for g in rep.get("gates") or []:
-            mid_g = g.get("metric_id") or g.get("dimension")
-            if not mid_g:
-                continue
-            acc["gates"][mid_g] = g
-        for f in rep.get("findings") or []:
-            code = f.get("code")
-            if not code:
-                continue
-            acc["findings"][code] = f
+            acc_m["k_trials"].append(rep["k_trials"])
+
+        boots_by_id: dict[str, dict[str, Any]] = {}
         for b in rep.get("bootstraps") or []:
-            mid_b = b.get("metric_id")
-            if not mid_b:
+            bid = b.get("metric_id")
+            if bid:
+                boots_by_id[str(bid)] = b
+
+        seen_metrics: set[str] = set()
+        for bid, b in boots_by_id.items():
+            seen_metrics.add(bid)
+            obs = _obs_from_bootstrap(b)
+            if not obs:
                 continue
-            acc["bootstraps"][mid_b] = b
+            slot = raw[mid].setdefault(
+                bid,
+                {
+                    "dimension": b.get("dimension") or bid,
+                    "values": [],
+                    "passes": [],
+                    "notes": [],
+                    "n_reports": 0,
+                },
+            )
+            if b.get("dimension"):
+                slot["dimension"] = b["dimension"]
+            for val, passed in obs:
+                slot["values"].append(val)
+                slot["passes"].append(passed)
+            slot["n_reports"] += 1
+            note = b.get("summary") or ""
+            if note:
+                slot["notes"].append(str(note)[:240])
+
+        for g in rep.get("gates") or []:
+            gid = g.get("metric_id") or g.get("dimension")
+            if not gid or str(gid) in seen_metrics:
+                continue
+            # Only use gate when no bootstrap for this metric in this report.
+            obs = _obs_from_gate(g)
+            if not obs:
+                continue
+            slot = raw[mid].setdefault(
+                str(gid),
+                {
+                    "dimension": g.get("dimension") or str(gid),
+                    "values": [],
+                    "passes": [],
+                    "notes": [],
+                    "n_reports": 0,
+                },
+            )
+            for val, passed in obs:
+                slot["values"].append(val)
+                slot["passes"].append(passed)
+            slot["n_reports"] += 1
+            expl = g.get("explanation")
+            if expl:
+                slot["notes"].append(str(expl)[:240])
+
+    by_model: dict[str, dict[str, Any]] = {}
+    for mid, metrics in raw.items():
+        m_meta = meta[mid]
+        gates: dict[str, Any] = {}
+        boots: dict[str, Any] = {}
+        stats_list: list[BootstrapStats] = []
+        for metric_id, slot in metrics.items():
+            if not slot["passes"]:
+                continue
+            gate, boot, stats = _finalize_metric(
+                metric_id,
+                dimension=str(slot.get("dimension") or metric_id),
+                values=list(slot["values"]),
+                passes=list(slot["passes"]),
+                notes=list(slot["notes"]),
+                n_reports=int(slot.get("n_reports") or 0),
+                threshold_pass=threshold_pass,
+                threshold_std=threshold_std,
+            )
+            gates[metric_id] = gate
+            boots[metric_id] = boot
+            stats_list.append(stats)
+
+        findings: dict[str, Any] = {}
+        try:
+            for f in evaluate_findings(stats_list):
+                findings[f.code] = {
+                    "code": f.code,
+                    "name": f.name,
+                    "present": f.present,
+                    "severity": f.severity,
+                    "rationale": f.rationale
+                    + f" [pooled n across metrics; {len(m_meta['sources'])} report files]",
+                    "linked_metrics": list(f.linked_metrics or []),
+                }
+        except Exception:
+            # Fall back: leave findings empty if criteria cannot run.
+            pass
+
+        by_model[mid] = {
+            "model": mid,
+            "packs": m_meta["packs"],
+            "gates": gates,
+            "findings": findings,
+            "bootstraps": boots,
+            "sources": m_meta["sources"],
+            "k_trials": m_meta["k_trials"],
+            "run_ids": m_meta["run_ids"],
+            "pooled": True,
+            "n_reports": len(m_meta["sources"]),
+        }
     return by_model
 
 
@@ -168,6 +457,56 @@ def collect_universe_fixed(by_model: dict[str, dict[str, Any]]):
     # include catalogue syndrome codes even if no findings yet
     findings.update(SYNDROME_TREES.keys())
     return models, sorted(metrics), sorted(findings), sorted(packs)
+
+
+# matplotlib RdYlGn stops (approx), t in [0,1] → (r,g,b) 0–255
+_RDYLGN_STOPS: list[tuple[float, tuple[int, int, int]]] = [
+    (0.0, (165, 0, 38)),
+    (0.1, (215, 48, 39)),
+    (0.2, (244, 109, 67)),
+    (0.3, (253, 174, 97)),
+    (0.4, (254, 224, 139)),
+    (0.5, (255, 255, 191)),
+    (0.6, (217, 239, 139)),
+    (0.7, (166, 217, 106)),
+    (0.8, (102, 189, 99)),
+    (0.9, (26, 152, 80)),
+    (1.0, (0, 104, 55)),
+]
+
+
+def rdylgn_rgb(t: float) -> tuple[int, int, int]:
+    """RdYlGn colormap: 0 = red (fail), 0.5 = yellow, 1 = green (pass)."""
+    t = max(0.0, min(1.0, float(t)))
+    for i in range(len(_RDYLGN_STOPS) - 1):
+        t0, c0 = _RDYLGN_STOPS[i]
+        t1, c1 = _RDYLGN_STOPS[i + 1]
+        if t <= t1 or i == len(_RDYLGN_STOPS) - 2:
+            if t1 <= t0:
+                return c1
+            u = (t - t0) / (t1 - t0) if t1 > t0 else 0.0
+            u = max(0.0, min(1.0, u))
+            return (
+                int(round(c0[0] + (c1[0] - c0[0]) * u)),
+                int(round(c0[1] + (c1[1] - c0[1]) * u)),
+                int(round(c0[2] + (c1[2] - c0[2]) * u)),
+            )
+    return _RDYLGN_STOPS[-1][1]
+
+
+def pass_rate_style(pass_rate: float | None) -> str:
+    """Inline style for continuous RdYlGn fill by pass_rate in [0,1]."""
+    if pass_rate is None:
+        return ""
+    try:
+        t = float(pass_rate)
+    except Exception:
+        return ""
+    r, g, b = rdylgn_rgb(t)
+    # Readable text: dark on yellow/light, light on deep red/green.
+    luminance = 0.299 * r + 0.587 * g + 0.114 * b
+    fg = "#111" if luminance >= 150 else "#fff"
+    return f' style="background-color:rgb({r},{g},{b});color:{fg}"'
 
 
 def status_class(status: str | None, not_run: bool = False) -> str:
@@ -241,23 +580,188 @@ def humanize_eval_text(text: str) -> str:
     return s
 
 
+def _fmt_pass_rate(pr: Any) -> str:
+    try:
+        return f"{float(pr):.0%}"
+    except Exception:
+        return "?"
+
+
+def _fmt_std(std: Any) -> str:
+    try:
+        return f"{float(std):.2f}"
+    except Exception:
+        return "?"
+
+
+def gate_trial_n(
+    gate: dict[str, Any] | None,
+    bootstrap: dict[str, Any] | None = None,
+) -> int | None:
+    """Best-effort trial / population size for a gate cell.
+
+    Prefer explicit ``n`` on the gate or bootstrap, then list lengths
+    (``values`` / ``scores`` / ``per_trial``), then ``n=…`` in explanation text.
+    """
+    for src in (gate, bootstrap):
+        if not src:
+            continue
+        for key in ("n", "n_trials"):
+            v = src.get(key)
+            if isinstance(v, bool):
+                continue
+            if isinstance(v, int) and v > 0:
+                return v
+            if isinstance(v, float) and v == int(v) and v > 0:
+                return int(v)
+            if isinstance(v, str) and v.isdigit() and int(v) > 0:
+                return int(v)
+        trials = src.get("trials")
+        if isinstance(trials, int) and trials > 0:
+            return trials
+        if isinstance(trials, (list, tuple)) and trials:
+            return len(trials)
+        for key in ("values", "scores", "per_trial"):
+            vals = src.get(key)
+            if isinstance(vals, (list, tuple)) and vals:
+                return len(vals)
+    for src in (gate, bootstrap):
+        if not src:
+            continue
+        for key in ("explanation", "summary"):
+            text = src.get(key)
+            if not text:
+                continue
+            m = re.search(r"\bn=(\d+)\b", str(text))
+            if m:
+                n = int(m.group(1))
+                if n > 0:
+                    return n
+    return None
+
+
 def fmt_gate_cell(gate: dict[str, Any] | None) -> tuple[str, str]:
     if gate is None:
         return "Not run", "not-run"
     status = str(gate.get("status") or "?")
-    pr = gate.get("pass_rate")
-    std = gate.get("std")
-    try:
-        pr_s = f"{float(pr):.0%}"
-    except Exception:
-        pr_s = "?"
-    try:
-        std_s = f"{float(std):.2f}"
-    except Exception:
-        std_s = "?"
+    pr_s = _fmt_pass_rate(gate.get("pass_rate"))
+    std_s = _fmt_std(gate.get("std"))
     # Color encodes status; cell text is just pass rate + σ.
     text = f"{pr_s} pass · σ={std_s}"
     return text, status_class(status)
+
+
+def fmt_gate_tooltip(
+    gate: dict[str, Any] | None,
+    bootstrap: dict[str, Any] | None = None,
+) -> str:
+    """Multi-line floating tooltip: pass %, n, σ, status (+ short note)."""
+    if gate is None:
+        return "Not run"
+    pr_s = _fmt_pass_rate(gate.get("pass_rate"))
+    std_s = _fmt_std(gate.get("std"))
+    status = str(gate.get("status") or "?").upper()
+    n = gate_trial_n(gate, bootstrap)
+    n_s = str(n) if n is not None else "?"
+    lines = [
+        f"{pr_s} pass",
+        f"n={n_s} trials",
+        f"σ={std_s}",
+        status,
+    ]
+    expl = gate.get("explanation") or (bootstrap or {}).get("summary")
+    if expl:
+        # Drop the leading stats line (already shown above); keep a short note.
+        note = humanize_eval_text(str(expl))
+        note = re.sub(
+            r"^\d+\s+trials\s*·\s*mean\s+[-\d.]+\s*·\s*σ=[-\d.]+\s*·\s*"
+            r"[\d.?%]+\s*pass\s*→\s*\w+(?:\s*\([^)]*\))?\s*\.?\s*",
+            "",
+            note,
+            count=1,
+        )
+        # Also strip raw stats prefix if humanize didn't rewrite it.
+        note = re.sub(
+            r"^n=\d+\s+mean=[-\d.]+\s+std=[-\d.]+\s+pass_rate=[-\d.]+\s*→\s*\w+"
+            r"(?:\s*\([^)]*\))?\s*\.?\s*",
+            "",
+            note,
+            count=1,
+        )
+        note = re.sub(r"^\(attuned\)\s*\.?\s*", "", note, flags=re.I)
+        note = note.strip(" .")
+        if note:
+            if len(note) > 160:
+                note = note[:157] + "…"
+            lines.append(note)
+    return "\n".join(lines)
+
+
+def gate_cell_attrs(
+    gate: dict[str, Any] | None,
+    bootstrap: dict[str, Any] | None = None,
+) -> str:
+    """HTML attributes for metric cells: data-* for JS floating tip only.
+
+    Intentionally omits native ``title=`` so the browser does not show a second
+    delayed tooltip on top of ``#cell-tip``.
+    """
+    if gate is None:
+        tip = "Not run"
+        tip_esc = html.escape(tip, quote=True)
+        return (
+            f' data-status="NOT_RUN" data-tip="{tip_esc}"'
+            f' aria-label="{tip_esc}"'
+        )
+    pr = gate.get("pass_rate")
+    try:
+        pr_pct = f"{float(pr) * 100:.0f}"
+    except Exception:
+        pr_pct = ""
+    std = gate.get("std")
+    try:
+        std_s = f"{float(std):.2f}"
+    except Exception:
+        std_s = ""
+    status = str(gate.get("status") or "?").upper()
+    n = gate_trial_n(gate, bootstrap)
+    n_s = str(n) if n is not None else "?"
+    tip = fmt_gate_tooltip(gate, bootstrap)
+    tip_esc = html.escape(tip, quote=True)
+    # Single-line aria-label for a11y (does not spawn a browser hover tooltip).
+    aria = f"{_fmt_pass_rate(pr)} pass · n={n_s} · σ={_fmt_std(std)} · {status}"
+    attrs = [
+        f' data-pass="{html.escape(pr_pct, quote=True)}"' if pr_pct != "" else "",
+        f' data-n="{html.escape(n_s, quote=True)}"',
+        f' data-std="{html.escape(std_s, quote=True)}"' if std_s != "" else "",
+        f' data-status="{html.escape(status, quote=True)}"',
+        f' data-tip="{tip_esc}"',
+        f' aria-label="{html.escape(aria, quote=True)}"',
+    ]
+    return "".join(attrs)
+
+
+def finding_cell_attrs(
+    tip: str | None,
+    *,
+    present: bool | None = None,
+    severity: str | None = None,
+) -> str:
+    """Light tooltip attrs for syndrome matrix cells (no native title=)."""
+    if not tip:
+        return ""
+    tip_s = str(tip).strip()
+    if not tip_s:
+        return ""
+    if len(tip_s) > 400:
+        tip_s = tip_s[:397] + "…"
+    tip_esc = html.escape(tip_s, quote=True)
+    parts = [f' data-tip="{tip_esc}"', f' aria-label="{tip_esc}"']
+    if present is not None:
+        parts.insert(0, f' data-status="{"PRESENT" if present else "ABSENT"}"')
+    if severity:
+        parts.insert(0, f' data-sev="{html.escape(str(severity), quote=True)}"')
+    return "".join(parts)
 
 
 def fmt_finding_cell(finding: dict[str, Any] | None) -> tuple[str, str]:
@@ -500,13 +1004,17 @@ def build_html(
             row_cls = "row metric"
         cells = []
         for m in models:
-            text, cls = fmt_gate_cell(by_model[m]["gates"].get(metric))
-            title_attr = ""
             g = by_model[m]["gates"].get(metric)
-            if g and g.get("explanation"):
-                tip = humanize_eval_text(str(g["explanation"]))[:400]
-                title_attr = f' title="{html.escape(tip)}"'
-            cells.append(f"<td class='{cls}'{title_attr}>{html.escape(text)}</td>")
+            boot = by_model[m]["bootstraps"].get(metric)
+            text, cls = fmt_gate_cell(g)
+            attrs = gate_cell_attrs(g, boot)
+            pr = g.get("pass_rate") if g else None
+            style = pass_rate_style(pr if pr is not None else None)
+            # Continuous RdYlGn by pass %; keep status class for semantics / chips.
+            rate_cls = " rate-scale" if g is not None else ""
+            cells.append(
+                f"<td class='{cls}{rate_cls}'{attrs}{style}>{html.escape(text)}</td>"
+            )
         gate_rows.append(
             f"<tr><th class='{row_cls}'>{metric_label}</th>{''.join(cells)}</tr>"
         )
@@ -532,20 +1040,32 @@ def build_html(
                 pw = evaluate_tree(tree, gates_from_report_acc(by_model[m]))
                 if pw.not_evaluated:
                     text, cls = "Not run", "not-run"
+                    attrs = finding_cell_attrs("Not evaluated on this model")
                 elif pw.present:
                     text, cls = f"Present · {pw.severity}", "present"
+                    attrs = finding_cell_attrs(
+                        pw.terminal_label, present=True, severity=pw.severity
+                    )
                 else:
                     text, cls = f"Not present · {pw.severity}", "absent"
-                title_attr = f' title="{html.escape(pw.terminal_label)}"'
+                    attrs = finding_cell_attrs(
+                        pw.terminal_label, present=False, severity=pw.severity
+                    )
             else:
                 text, cls = fmt_finding_cell(f)
-                title_attr = ""
+                tip = None
                 if f and f.get("rationale"):
                     tip = humanize_eval_text(str(f["rationale"]))[:400]
-                    title_attr = f' title="{html.escape(tip)}"'
+                elif f is None:
+                    tip = "Not run"
+                attrs = finding_cell_attrs(
+                    tip,
+                    present=bool(f.get("present")) if f else None,
+                    severity=(f.get("severity") if f else None),
+                )
             link = f"#syndrome-{html.escape(code)}"
             cells.append(
-                f"<td class='{cls}'{title_attr}>"
+                f"<td class='{cls}'{attrs}>"
                 f"<a class='cell-link' href='{link}'>{html.escape(text)}</a></td>"
             )
         finding_rows.append(
@@ -615,12 +1135,40 @@ def build_html(
   .legend {{ display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 8px; font-size: 12px; }}
   .legend span {{ display: inline-flex; align-items: center; gap: 4px; }}
   .swatch {{ width: 10px; height: 10px; border: 1px solid #999; display: inline-block; }}
-  .swatch.pass, td.pass {{ background: #c8e6c9; }}
-  .swatch.fail, td.fail {{ background: #ffcdd2; }}
-  .swatch.unstable, td.unstable {{ background: #fff3cd; }}
+  .swatch.pass {{ background: #c8e6c9; }}
+  .swatch.fail {{ background: #ffcdd2; }}
+  .swatch.unstable {{ background: #fff3cd; }}
+  /* Discrete classes still used by packs / syndromes / chips; metric cells use
+     inline RdYlGn gradient via .rate-scale (inline style wins). */
+  td.pass {{ background: #c8e6c9; }}
+  td.fail {{ background: #ffcdd2; }}
+  td.unstable {{ background: #fff3cd; }}
+  td.rate-scale {{ /* fill set inline from pass_rate */ }}
   .swatch.not-run, td.not-run {{ background: #eee; color: #555; font-style: italic; }}
   .swatch.present, td.present {{ background: #ffcdd2; }}
   .swatch.absent, td.absent {{ background: #c8e6c9; }}
+  .rate-legend {{
+    display: flex; align-items: center; flex-wrap: wrap; gap: 8px;
+    margin: 0 0 8px; font-size: 12px; color: #444;
+  }}
+  .rate-bar {{
+    display: inline-block; width: 180px; height: 12px; border: 1px solid #999;
+    border-radius: 2px;
+    background: linear-gradient(
+      90deg,
+      rgb(165,0,38) 0%,
+      rgb(215,48,39) 10%,
+      rgb(244,109,67) 20%,
+      rgb(253,174,97) 30%,
+      rgb(254,224,139) 40%,
+      rgb(255,255,191) 50%,
+      rgb(217,239,139) 60%,
+      rgb(166,217,106) 70%,
+      rgb(102,189,99) 80%,
+      rgb(26,152,80) 90%,
+      rgb(0,104,55) 100%
+    );
+  }}
   /* No nested vertical scroll: page (or parent shell) scrolls. Horizontal
      scroll only for wide multi-model tables. */
   .panel {{
@@ -761,6 +1309,45 @@ def build_html(
   }}
   .toc {{ font-size: 12px; margin: 0 0 10px; }}
   .toc a {{ margin-right: 8px; }}
+  /* Anchor targets: leave room under sticky thead / shell chrome */
+  details.syndrome,
+  h2[id],
+  li[id^="ref-"] {{
+    scroll-margin-top: 12px;
+  }}
+  details.appendix {{
+    border: 1px solid #ccc; margin: 12px 0 8px; padding: 0;
+    background: #fff;
+  }}
+  details.appendix > summary {{
+    cursor: pointer; padding: 6px 8px; background: #f7f7f7;
+    font-size: 13px; font-weight: 600;
+  }}
+  details.appendix .appendix-body {{ padding: 8px 10px 10px; }}
+  a.cell-link, th.row a {{ cursor: pointer; }}
+  /* Floating cell tooltip (fixed so it is not clipped by .panel overflow-x) */
+  td[data-tip] {{ cursor: help; }}
+  #cell-tip {{
+    position: fixed;
+    z-index: 10000;
+    max-width: min(320px, calc(100vw - 16px));
+    padding: 6px 8px;
+    border: 1px solid #333;
+    border-radius: 4px;
+    background: #1e1e1e;
+    color: #f5f5f5;
+    font: 11px/1.4 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    white-space: pre-line;
+    pointer-events: none;
+    box-shadow: 0 4px 14px rgba(0,0,0,0.28);
+    opacity: 0;
+    visibility: hidden;
+    transition: opacity 0.06s ease;
+  }}
+  #cell-tip.visible {{
+    opacity: 1;
+    visibility: visible;
+  }}
 </style>
 </head>
 <body>
@@ -771,7 +1358,8 @@ def build_html(
     {len(packs)} pack(s) ·
     {len(metrics)} metric(s) ·
     {len(finding_codes)} syndrome(s) ·
-    {len(SYNDROME_TREES)} decision trees
+    {len(SYNDROME_TREES)} decision trees ·
+    gates <strong>pooled</strong> across all historic diagnose JSONs (suite + queue + repro trials); tooltip <code>n</code> = total trial population
   </div>
   <div class="legend">
     <span><i class="swatch pass"></i> Pass / ran / not present</span>
@@ -779,14 +1367,13 @@ def build_html(
     <span><i class="swatch unstable"></i> Unstable</span>
     <span><i class="swatch not-run"></i> Not run</span>
   </div>
-  <h2>Pack coverage</h2>
-  <div class="panel">
-    <table>
-      <thead><tr><th class="corner">Pack</th>{th_models()}</tr></thead>
-      <tbody>
-        {''.join(pack_rows) if pack_rows else '<tr><td colspan="99">No packs found</td></tr>'}
-      </tbody>
-    </table>
+  <div class="toc meta">
+    <a href="#syndrome-matrix">Syndromes</a>
+    <a href="#decision-trees">Decision trees</a>
+    <a href="#metric-results">Metrics</a>
+    <a href="#references">References</a>
+    <a href="#pack-coverage">Pack coverage</a>
+    <a href="#source-files">Source files</a>
   </div>
 
   <h2 id="syndrome-matrix">Syndrome matrix</h2>
@@ -805,7 +1392,14 @@ def build_html(
   </div>
   {syndrome_sections}
 
-  <h2>Metric results</h2>
+  <h2 id="metric-results">Metric results</h2>
+  <div class="rate-legend" title="matplotlib RdYlGn-style scale on pooled pass rate">
+    <span>Pass rate</span>
+    <span>0%</span>
+    <i class="rate-bar" aria-hidden="true"></i>
+    <span>100%</span>
+    <span class="hint">(RdYlGn · red=low · yellow=mid · green=high)</span>
+  </div>
   <div class="panel">
     <table>
       <thead><tr><th class="corner">Metric</th>{th_models()}</tr></thead>
@@ -815,21 +1409,117 @@ def build_html(
     </table>
   </div>
 
-  <h2>References</h2>
+  <h2 id="references">References</h2>
   <div class="refs">
     <ul>
       {refs_html}
     </ul>
   </div>
 
-  <h2>Source files</h2>
-  <ul class="sources">
-    {''.join(source_blocks)}
-  </ul>
+  <details class="appendix" id="pack-coverage">
+    <summary>Pack coverage</summary>
+    <div class="appendix-body">
+      <div class="panel">
+        <table>
+          <thead><tr><th class="corner">Pack</th>{th_models()}</tr></thead>
+          <tbody>
+            {''.join(pack_rows) if pack_rows else '<tr><td colspan="99">No packs found</td></tr>'}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </details>
+
+  <details class="appendix" id="source-files">
+    <summary>Source files</summary>
+    <div class="appendix-body">
+      <ul class="sources">
+        {''.join(source_blocks)}
+      </ul>
+    </div>
+  </details>
 
   <footer>DSM-AE comparison</footer>
+  <div id="cell-tip" role="tooltip" hidden></div>
   <script>
   (function () {{
+    // Floating tooltip for matrix cells (works inside sticky / overflow-x panels).
+    // Cells use data-tip + aria-label only — no title= (avoids delayed browser tip).
+    (function cellTip() {{
+      const tip = document.getElementById("cell-tip");
+      if (!tip) return;
+      let active = null;
+      const pad = 12;
+
+      function hide() {{
+        active = null;
+        tip.classList.remove("visible");
+        tip.hidden = true;
+        tip.textContent = "";
+      }}
+
+      function place(clientX, clientY) {{
+        tip.hidden = false;
+        tip.classList.add("visible");
+        const rect = tip.getBoundingClientRect();
+        let x = clientX + pad;
+        let y = clientY + pad;
+        if (x + rect.width > window.innerWidth - 4) {{
+          x = Math.max(4, clientX - rect.width - pad);
+        }}
+        if (y + rect.height > window.innerHeight - 4) {{
+          y = Math.max(4, clientY - rect.height - pad);
+        }}
+        tip.style.left = x + "px";
+        tip.style.top = y + "px";
+      }}
+
+      function showFor(el, clientX, clientY) {{
+        const text = el.getAttribute("data-tip") || "";
+        if (!text) {{
+          hide();
+          return;
+        }}
+        // Strip any accidental title so only one tip is ever shown.
+        if (el.hasAttribute("title")) el.removeAttribute("title");
+        active = el;
+        tip.textContent = text;
+        place(clientX, clientY);
+      }}
+
+      document.addEventListener("pointerover", (ev) => {{
+        const el = ev.target && ev.target.closest
+          ? ev.target.closest("td[data-tip]")
+          : null;
+        if (!el) return;
+        showFor(el, ev.clientX, ev.clientY);
+      }});
+      document.addEventListener("pointermove", (ev) => {{
+        if (!active) return;
+        const el = ev.target && ev.target.closest
+          ? ev.target.closest("td[data-tip]")
+          : null;
+        if (!el) {{
+          hide();
+          return;
+        }}
+        if (el !== active) {{
+          showFor(el, ev.clientX, ev.clientY);
+          return;
+        }}
+        place(ev.clientX, ev.clientY);
+      }});
+      document.addEventListener("pointerout", (ev) => {{
+        if (!active) return;
+        const to = ev.relatedTarget;
+        if (to && active.contains && active.contains(to)) return;
+        if (to && to.closest && to.closest("td[data-tip]") === active) return;
+        hide();
+      }});
+      window.addEventListener("scroll", hide, true);
+      window.addEventListener("blur", hide);
+    }})();
+
     // Performance: do NOT load mermaid or render any SVG until a syndrome
     // section is opened. Sources live in <script type="text/plain"> so
     // startOnLoad cannot process hundreds of graphs on first paint.
@@ -910,21 +1600,91 @@ def build_html(
       d.addEventListener("toggle", () => {{
         if (d.open) renderLazyIn(d);
       }});
-      // If somehow open on load (hash jump), render then
       if (d.open) renderLazyIn(d);
     }});
 
-    // Hash navigation: open target syndrome and render its diagram only
-    function openHash() {{
-      if (!location.hash) return;
-      const el = document.querySelector(location.hash);
-      if (el && el.tagName === "DETAILS") {{
+    /** Scroll target into view; when full-height iframe embed, also scroll parent. */
+    function jumpTo(el) {{
+      if (!el) return;
+      el.scrollIntoView({{ behavior: "smooth", block: "start" }});
+      try {{
+        if (window.parent && window.parent !== window) {{
+          const iframe = window.frameElement;
+          if (iframe) {{
+            const rect = el.getBoundingClientRect();
+            const iframeRect = iframe.getBoundingClientRect();
+            const parentDoc = window.parent.document.documentElement;
+            const parentScroll =
+              window.parent.pageYOffset || parentDoc.scrollTop || 0;
+            const top = parentScroll + iframeRect.top + rect.top - 16;
+            window.parent.scrollTo({{ top: Math.max(0, top), behavior: "smooth" }});
+            // Notify shell to remeasure iframe height after open/expand.
+            try {{
+              window.parent.postMessage(
+                {{ type: "dsm-ae-matrix-resize" }},
+                window.location.origin
+              );
+            }} catch (e) {{}}
+          }}
+        }}
+      }} catch (e) {{ /* cross-origin */ }}
+    }}
+
+    function openAndJump(el) {{
+      if (!el) return;
+      if (el.tagName === "DETAILS") {{
+        const wasOpen = el.open;
         el.open = true;
-        renderLazyIn(el);
+        if (el.classList.contains("syndrome")) {{
+          renderLazyIn(el);
+        }}
+        // Wait a frame (and a bit more if newly opened) so layout includes body.
+        requestAnimationFrame(() => {{
+          jumpTo(el);
+          if (!wasOpen) {{
+            setTimeout(() => jumpTo(el), 50);
+            setTimeout(() => jumpTo(el), 250);
+          }}
+        }});
+      }} else {{
+        jumpTo(el);
       }}
     }}
+
+    function resolveHash(hash) {{
+      if (!hash || hash === "#") return null;
+      const id = hash.startsWith("#") ? hash.slice(1) : hash;
+      return document.getElementById(id);
+    }}
+
+    function openHash() {{
+      const el = resolveHash(location.hash);
+      if (el) openAndJump(el);
+    }}
+
+    // Intercept in-page anchors so we expand + jump even when hash is unchanged.
+    document.addEventListener("click", (ev) => {{
+      const a = ev.target.closest('a[href^="#"]');
+      if (!a) return;
+      const href = a.getAttribute("href") || "";
+      if (href.length < 2) return;
+      const el = resolveHash(href);
+      if (!el) return;
+      ev.preventDefault();
+      if (location.hash !== href) {{
+        history.pushState(null, "", href);
+      }}
+      openAndJump(el);
+    }});
+
     window.addEventListener("hashchange", openHash);
-    openHash();
+    window.addEventListener("popstate", openHash);
+    // Initial load with #syndrome-…
+    if (document.readyState === "loading") {{
+      document.addEventListener("DOMContentLoaded", openHash);
+    }} else {{
+      openHash();
+    }}
   }})();
   </script>
 </body>

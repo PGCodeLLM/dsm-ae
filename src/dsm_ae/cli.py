@@ -129,12 +129,18 @@ def diagnose_cmd(
         "-t",
         help="Treatment id (prompt_reminder | skill_scaffold | expert_oversight)",
     ),
+    context_bloat: Optional[float] = typer.Option(
+        None,
+        "--context-bloat",
+        help="Bloated-context fill level before pack prompt (e.g. 0.5 = 50%). Separate results dir recommended.",
+    ),
 ) -> None:
     """Run indicator protocols k times; emit outcome-gate matrix + findings."""
     pack_list = [x.strip() for x in packs.split(",")] if packs else None
     console.print(
         f"[bold]DSM-AE diagnose[/bold] model={model} k={k} "
-        f"concurrency={concurrency} yaml={models_yaml} treatment={treatment or 'none'}"
+        f"concurrency={concurrency} yaml={models_yaml} treatment={treatment or 'none'} "
+        f"context_bloat={context_bloat if context_bloat is not None else 'none'}"
     )
     report = diagnose(
         model=model,
@@ -152,6 +158,7 @@ def diagnose_cmd(
         concurrency=concurrency,
         rpm=rpm,
         treatment=treatment,
+        context_bloat=context_bloat,
     )
     _print_report(report, out, json_out)
 

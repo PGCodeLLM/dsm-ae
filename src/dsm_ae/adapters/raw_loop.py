@@ -37,16 +37,23 @@ class RawToolLoopAdapter:
         trial_index: int = 0,
         variant: str | None = None,
         allowed_deletes: set[str] | None = None,
+        prefix_messages: list[dict[str, Any]] | None = None,
     ) -> TrialTrace:
-        """Run agent until done() or max_turns."""
+        """Run agent until done() or max_turns.
+
+        ``prefix_messages`` (optional): multi-turn history inserted after system
+        and before the pack user prompt (bloated-context experiments).
+        """
         t0 = time.time()
         if hasattr(self.client, "set_trial"):
             self.client.set_trial(trial_index)  # type: ignore[attr-defined]
 
         messages: list[dict[str, Any]] = [
             {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_prompt},
         ]
+        if prefix_messages:
+            messages.extend(list(prefix_messages))
+        messages.append({"role": "user", "content": user_prompt})
         trace = TrialTrace(
             scenario_id=scenario_id,
             pack=pack,
