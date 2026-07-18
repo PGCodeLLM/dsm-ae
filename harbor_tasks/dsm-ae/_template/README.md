@@ -1,0 +1,1 @@
+Template for dsm-ae Harbor tasks. Copy/adapt for new packs.
