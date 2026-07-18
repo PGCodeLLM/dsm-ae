@@ -165,9 +165,20 @@ def _build_task_toml(pack_id: str, pack_name: str, syndromes: list[str], dimensi
 
         [agent]
         timeout_sec = 600.0
+        # LLM profile vs smoke:
+        #   For real LLM agent runs (harbor ... -a <agent> -m <model>):
+        #     network_mode = "allowlist"   # allow outbound to API/proxy
+        #     allowed_hosts = ["<your-proxy-or-api-host>"]  # e.g. cli-proxy host, api.openai.com for OpenAI-compat
+        #   Smoke/oracle uses no-network (current default).
+        #   Env for agent inside container (LLM path): OPENAI_API_BASE, OPENAI_API_KEY, model id via -m
+        # Context windows (for bloat/history stuffing in agent runs):
+        #   Use operational Codex values, NOT marketing 1.05M:
+        #     gpt-5.5: 272000 ; gpt-5.6-*: 372000
+        #   See reports/backfill/CONTEXT_WINDOWS.md and src/dsm_ae/context_bloat.py
 
         [environment]
-        network_mode = "no-network"  # smoke with oracle/fixture; LLM runs override allowlist
+        network_mode = "no-network"  # smoke with oracle/fixture; LLM runs: set "allowlist" (see [agent] above or override)
+        # allowed_hosts = ["proxy.example.internal"]  # uncomment + set for allowlist LLM runs
         cpus = 1
         memory_mb = 4096
         os = "linux"
@@ -303,7 +314,8 @@ README_CONTENT = dedent(
       This writes `docker_cleanup.json` and calls `cleanup_docker_for_job(job_id)` always.
 
     ## Notes
-    - `network_mode = "no-network"` for initial smoke (oracle). Real LLM agents will use allowlist + env keys.
+    - `network_mode = "no-network"` for initial smoke (oracle). For LLM agent path use "allowlist" + allowed_hosts (see task.toml [agent] section and docs/HARBOR.md).
+      Documented: env vars OPENAI_API_BASE / OPENAI_API_KEY / model, Codex context windows (272k/372k for GPT), docker labels, always-cleanup via runner.
     - Scoring inside container uses the bridge; prefers pre-written trajectories/scores.json from agent phase.
     - For multi-trial, outer driver or k-datasets will be used (see Task 4).
 
@@ -604,6 +616,17 @@ def _write_top_readme(dsm_dir: Path) -> None:
         (will overwrite; git rm any old vendored trees under environment/src if present)
 
         Generated for all packs in registry.
+
+        ## LLM agent path + network policy (Task 6)
+        - Default for smoke: `[environment] network_mode = "no-network"`
+        - For LLM agent runs: set `network_mode = "allowlist"` under `[environment]` (or `[agent]` per Harbor).
+          Add `allowed_hosts = ["<proxy-host>", "api.openai.com"]` (OpenAI-compat / CLIProxy).
+        - Pass model + keys via Harbor env / docker: `OPENAI_API_BASE`, `OPENAI_API_KEY` (and model id via `-m`).
+        - Context windows: when agent stuffs history/bloat, use Codex operational (gpt-5.5: 272k, gpt-5.6: 372k) **not** the 1.05M marketing number. See reports/backfill/CONTEXT_WINDOWS.md .
+        - Docker label (required for cleanup): `--label dsm-ae.harbor.job={job_id}`
+        - **Cleanup always**: wrap with `run_harbor_task(...)` or `harbor_run_job(...)` (guarantees `cleanup_docker_for_job` + docker_cleanup.json even on failure).
+        - Smoke tests: offline mock only (`--model mock/well_attuned` or via harbor_run_job); no live LLM required for validation.
+        - Agent wrapper note: real agent phase uses Harbor-provided agent (e.g. `-a claude-code`); scoring re-uses `pack.score` / `RawToolLoopAdapter` logic only in mock path of pack_bridge. Trajectories (litellm.jsonl etc) land in `/logs/agent/` inside container; copied to harbor_runs trajectories/ by persist.
         '''
     ).strip()
     _write_file(dsm_dir / "README.md", content)

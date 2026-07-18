@@ -82,39 +82,13 @@ python scripts/harbor_export_all_packs.py --out harbor_tasks
 
 Generated for all packs in registry.
 
-## Task 4: Multi-step / k-trial mapping (default outer loop)
-
-**Mapping decision (per plan + brief):**
-- **Default for k trials:** OUTER LOOP. One Harbor task execution = 1 trial (1 seed/persona).
-  The `scripts/harbor_run_job.py` (or queue integration) loops `for pack in packs: for t in range(k): run trial t`.
-  This keeps each Harbor task.toml simple (no [[steps]] bloat) and matches existing DSM-AE `k_trials` in ScaffoldCard + parallelizable runs.
-- Use Harbor `[[steps]]` **only** when a *single trial* has sequential dependencies requiring separate phases (setup container → agent run → verifier).
-  Example (only if needed):
-  ```toml
-  [[steps]]
-  name = "setup_gold"
-  [[steps]]
-  name = "agent"
-  [[steps]]
-  name = "verify"
-  ```
-
-**tool_integrity_tier2 special case:**
-- Fault injection (GoldReadFault for hard arm: first gold read_file returns transient error; agent must list/retry and not fabricate) is handled *inside* the pack `run_trial` + `GoldReadFaultAdapter`.
-- No `[[steps]]` for it (avoids heavy toml); documented in `tool_integrity_tier2/task.toml` (gold_read_fault + notes) and its README.md.
-- When using real agent in Harbor (not oracle/mock), the agent phase inside container will exercise the same pack code paths (fault wrapper active for hard scenario).
-
-**harbor_run_job.py usage (offline mock supported):**
-```
-python scripts/harbor_run_job.py --job-id j1234567 --model mock/well_attuned --packs hello_metacog,tool_integrity_tier2 --k 2
-```
-- Produces `reports/harbor_runs/j1234567/rewards/{pack}__t{i}.json` + trajectories/
-- Always runs `cleanup_docker_for_job(job_id)` in finally (labels: `dsm-ae.harbor.job={job_id}`)
-- Mock path: task_fn uses `pack_bridge.score_workspace` + `prepare_workspace` (no `harbor` CLI or docker needed).
-- For live: caller supplies task_fn that does `harbor run -p harbor_tasks/dsm-ae/<pack> ...` (with label).
-
-See:
-- .superpowers/sdd/task-4-brief.md
-- docs/superpowers/plans/2026-07-17-harbor-pack-migration.md (Task 4 section)
-- src/dsm_ae/harbor/runner.py (label docs)
-- src/dsm_ae/harbor/pack_bridge.py (mock path)
+## LLM agent path + network policy (Task 6)
+- Default for smoke: `[environment] network_mode = "no-network"`
+- For LLM agent runs: set `network_mode = "allowlist"` under `[environment]` (or `[agent]` per Harbor).
+  Add `allowed_hosts = ["<proxy-host>", "api.openai.com"]` (OpenAI-compat / CLIProxy).
+- Pass model + keys via Harbor env / docker: `OPENAI_API_BASE`, `OPENAI_API_KEY` (and model id via `-m`).
+- Context windows: when agent stuffs history/bloat, use Codex operational (gpt-5.5: 272k, gpt-5.6: 372k) **not** the 1.05M marketing number. See reports/backfill/CONTEXT_WINDOWS.md .
+- Docker label (required for cleanup): `--label dsm-ae.harbor.job={job_id}`
+- **Cleanup always**: wrap with `run_harbor_task(...)` or `harbor_run_job(...)` (guarantees `cleanup_docker_for_job` + docker_cleanup.json even on failure).
+- Smoke tests: offline mock only (`--model mock/well_attuned` or via harbor_run_job); no live LLM required for validation.
+- Agent wrapper note: real agent phase uses Harbor-provided agent (e.g. `-a claude-code`); scoring re-uses `pack.score` / `RawToolLoopAdapter` logic only in mock path of pack_bridge. Trajectories (litellm.jsonl etc) land in `/logs/agent/` inside container; copied to harbor_runs trajectories/ by persist.

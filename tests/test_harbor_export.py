@@ -109,3 +109,37 @@ def test_export_all_creates_task_toml(tmp_path: Path):
     assert "harbor_tasks/dsm-ae/" in df  # fixtures COPY uses context path
     # should not have old vendored copy style inside the task tree
     assert "COPY src /src/dsm-ae/src" not in df
+
+
+def test_export_includes_llm_network_policy_and_context_notes(tmp_path: Path):
+    """Task 6: generated task.toml must document allowlist/allowed_hosts, env vars, and Codex windows (no live LLM)."""
+    import importlib.util
+
+    root = Path(__file__).resolve().parents[1]
+    script_path = root / "scripts" / "harbor_export_all_packs.py"
+
+    spec = importlib.util.spec_from_file_location("harbor_export_mod", script_path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+
+    export_all = getattr(mod, "export_all", None)
+    out_dir = tmp_path / "harbor_policy"
+    export_all(out_dir)
+
+    toml_path = out_dir / "dsm-ae" / "hello_metacog" / "task.toml"
+    content = toml_path.read_text()
+
+    # network allowlist for LLM
+    assert 'network_mode = "allowlist"' in content
+    assert "allowed_hosts" in content
+    # env vars
+    assert "OPENAI_API_BASE" in content
+    assert "OPENAI_API_KEY" in content
+    # context windows guidance (Codex ops not marketing)
+    assert "272000" in content or "272k" in content.lower()
+    assert "372000" in content or "372k" in content.lower()
+    assert "1.05M" in content or "marketing" in content.lower() or "Codex" in content
+    # docker label and cleanup are in harbor README/docs but ensure smoke default
+    assert 'network_mode = "no-network"' in content
+    # no live execution here; purely static export test
+

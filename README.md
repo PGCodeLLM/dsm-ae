@@ -198,6 +198,14 @@ data/queue.db         # eval job queue (created on first enqueue; local)
 models.yaml           # credentials / rpm only (gitignored; see models.yaml.example)
 ```
 
+## Harbor tasks (additive)
+
+DSM-AE packs are also materialized as portable Harbor tasks (see migration plan).
+
+- Export / run (mock + live) / import / layout / cleanup: see [docs/HARBOR.md](docs/HARBOR.md)
+- Network allowlist + env for LLM agents, Codex context windows (272k/372k), docker labels, and guaranteed cleanup documented there.
+- Smoke validation is offline/mock only (no live LLM required).
+
 ## Design principles
 
 1. Diagnose **(model × scaffold × permission)** — Axis V scaffold card always recorded.
