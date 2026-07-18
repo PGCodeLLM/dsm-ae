@@ -955,6 +955,173 @@ def render_syndrome_section(
     return "\n".join(body)
 
 
+
+def _metric_algorithms_md_path() -> Path:
+    """Repo path to docs/appendices/METRIC_ALGORITHMS.md."""
+    return Path(__file__).resolve().parents[1] / "docs" / "appendices" / "METRIC_ALGORITHMS.md"
+
+
+def _inline_md(text: str) -> str:
+    """Escape then apply a small subset of inline Markdown (**bold**, `code`)."""
+    s = html.escape(text)
+    s = re.sub(r"\*\*(.+?)\*\*", r"<strong>\1</strong>", s)
+    s = re.sub(r"`([^`]+)`", r"<code>\1</code>", s)
+    return s
+
+
+def _md_table_to_html(rows: list[str]) -> str:
+    """Convert pipe-table lines (including separator) to an HTML table."""
+    parsed: list[list[str]] = []
+    for row in rows:
+        line = row.strip().strip("|")
+        cells = [c.strip() for c in line.split("|")]
+        # Skip markdown separator rows (|---|---|)
+        if cells and all(re.fullmatch(r":?-{3,}:?", c.replace(" ", "")) for c in cells):
+            continue
+        parsed.append(cells)
+    if not parsed:
+        return ""
+    head, *body = parsed
+    thead = "<thead><tr>" + "".join(f"<th>{_inline_md(c)}</th>" for c in head) + "</tr></thead>"
+    tbody_parts = []
+    for r in body:
+        # Pad/truncate to header width for ragged rows
+        if len(r) < len(head):
+            r = r + [""] * (len(head) - len(r))
+        elif len(r) > len(head):
+            r = r[: len(head)]
+        tbody_parts.append(
+            "<tr>" + "".join(f"<td>{_inline_md(c)}</td>" for c in r) + "</tr>"
+        )
+    tbody = "<tbody>" + "".join(tbody_parts) + "</tbody>"
+    return f'<div class="panel appendix-table"><table>{thead}{tbody}</table></div>'
+
+
+def md_to_appendix_html(md: str) -> str:
+    """Render METRIC_ALGORITHMS.md subset → HTML (headers, tables, lists, fences)."""
+    lines = md.replace("\r\n", "\n").split("\n")
+    out: list[str] = []
+    i = 0
+    n = len(lines)
+    while i < n:
+        line = lines[i]
+        # fenced code
+        if line.startswith("```"):
+            lang = line[3:].strip()
+            i += 1
+            code_lines: list[str] = []
+            while i < n and not lines[i].startswith("```"):
+                code_lines.append(lines[i])
+                i += 1
+            if i < n:
+                i += 1  # closing fence
+            code = html.escape("\n".join(code_lines))
+            cls = f' class="lang-{html.escape(lang)}"' if lang else ""
+            out.append(f"<pre{cls}><code>{code}</code></pre>")
+            continue
+        # table block
+        if line.strip().startswith("|"):
+            table_rows: list[str] = []
+            while i < n and lines[i].strip().startswith("|"):
+                table_rows.append(lines[i])
+                i += 1
+            out.append(_md_table_to_html(table_rows))
+            continue
+        # blank
+        if not line.strip():
+            i += 1
+            continue
+        # headings
+        m = re.match(r"^(#{1,4})\s+(.*)$", line)
+        if m:
+            level = len(m.group(1))
+            # skip top-level H1 — details summary already titles the section
+            if level == 1:
+                i += 1
+                continue
+            tag = f"h{min(level + 1, 4)}"  # ## → h3 under appendix, etc.
+            out.append(f"<{tag}>{_inline_md(m.group(2).strip())}</{tag}>")
+            i += 1
+            continue
+        # unordered list block
+        if re.match(r"^[-*]\s+", line):
+            items: list[str] = []
+            while i < n and re.match(r"^[-*]\s+", lines[i]):
+                items.append(re.sub(r"^[-*]\s+", "", lines[i]))
+                i += 1
+            out.append(
+                "<ul>"
+                + "".join(f"<li>{_inline_md(it)}</li>" for it in items)
+                + "</ul>"
+            )
+            continue
+        # italic-only pack lines like *Primary pack(s):* `x`
+        if line.strip().startswith("*") and line.strip().endswith("*") is False:
+            # treat as paragraph (inline handles ** and `)
+            out.append(f"<p>{_inline_md(line.strip())}</p>")
+            i += 1
+            continue
+        # paragraph (merge consecutive non-blank non-special)
+        para: list[str] = [line.strip()]
+        i += 1
+        while i < n:
+            nxt = lines[i]
+            if (
+                not nxt.strip()
+                or nxt.startswith("```")
+                or nxt.strip().startswith("|")
+                or re.match(r"^#{1,4}\s+", nxt)
+                or re.match(r"^[-*]\s+", nxt)
+            ):
+                break
+            para.append(nxt.strip())
+            i += 1
+        out.append(f"<p>{_inline_md(' '.join(para))}</p>")
+    return "\n".join(out)
+
+
+def render_metric_algorithms_appendix() -> str:
+    """Collapsed <details> block with full metric algorithm appendix HTML.
+
+    Returns empty string if the markdown source is missing (non-fatal).
+    """
+    md_path = _metric_algorithms_md_path()
+    if not md_path.is_file():
+        return (
+            '<details class="appendix" id="metric-algorithms">\n'
+            "  <summary>Appendix: Metric algorithms (source missing)</summary>\n"
+            '  <div class="appendix-body">\n'
+            "    <p class=\"meta\">Expected "
+            f"<code>{html.escape(str(md_path))}</code>. "
+            "Run <code>PYTHONPATH=src python scripts/generate_metric_appendix.py</code>.</p>\n"
+            "  </div>\n"
+            "</details>"
+        )
+    md = md_path.read_text(encoding="utf-8")
+    body = md_to_appendix_html(md)
+    # Count metrics for summary badge
+    n_metrics = len(re.findall(r"^### `", md, flags=re.M))
+    return (
+        f'<details class="appendix" id="metric-algorithms">\n'
+        f"  <summary>Appendix: Metric algorithms by syndrome"
+        f" ({n_metrics} metrics · determinism tags)</summary>\n"
+        f'  <div class="appendix-body appendix-md">\n'
+        f'    <p class="meta">Source: <code>docs/appendices/METRIC_ALGORITHMS.md</code>'
+        f" · regenerate with"
+        f" <code>PYTHONPATH=src python scripts/generate_metric_appendix.py</code>."
+        f" Tags: <code>DET_EXACT</code> exact match ·"
+        f" <code>DET_REGEX</code> regex/numeric ·"
+        f" <code>DET_SUBSTR</code> keyword ·"
+        f" <code>DET_EXEC</code> execute agent code ·"
+        f" <code>DET_STRUCT</code> static structure ·"
+        f" <code>DET_TRACE</code> tool/FS sequence ·"
+        f" <code>HYBRID</code> combined gates.</p>\n"
+        f"{body}\n"
+        f"  </div>\n"
+        f"</details>"
+    )
+
+
 def build_html(
     by_model: dict[str, dict[str, Any]],
     title: str = "DSM-AE Multi-Model Report",
@@ -1110,6 +1277,8 @@ def build_html(
             f"<code>{html.escape(packs_s)}</code>; trials: {html.escape(k_s)}; "
             f"sources: {html.escape('; '.join(srcs) if srcs else '—')}</li>"
         )
+
+    metric_algorithms_html = render_metric_algorithms_appendix()
 
     return f"""<!DOCTYPE html>
 <html lang="en">
@@ -1324,6 +1493,20 @@ def build_html(
     font-size: 13px; font-weight: 600;
   }}
   details.appendix .appendix-body {{ padding: 8px 10px 10px; }}
+  .appendix-md h3 {{ margin: 14px 0 6px; font-size: 0.95rem; border-top: 1px solid #e5e5e5; padding-top: 10px; }}
+  .appendix-md h3:first-child {{ border-top: 0; padding-top: 0; }}
+  .appendix-md h4 {{ margin: 10px 0 4px; font-size: 0.88rem; }}
+  .appendix-md p {{ margin: 0 0 6px; color: #333; font-size: 12px; }}
+  .appendix-md ul {{ margin: 2px 0 8px 0; padding-left: 18px; font-size: 12px; }}
+  .appendix-md pre {{
+    margin: 4px 0 10px; padding: 8px 10px; background: #f4f4f4;
+    border: 1px solid #ddd; border-radius: 3px; overflow-x: auto;
+    font: 11px/1.4 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }}
+  .appendix-md .appendix-table {{ margin: 6px 0 12px; }}
+  .appendix-md .appendix-table table {{ font-size: 11px; }}
+  .appendix-md .appendix-table th,
+  .appendix-md .appendix-table td {{ vertical-align: top; }}
   a.cell-link, th.row a {{ cursor: pointer; }}
   /* Floating cell tooltip (fixed so it is not clipped by .panel overflow-x) */
   td[data-tip] {{ cursor: help; }}
@@ -1374,9 +1557,13 @@ def build_html(
     <a href="#references">References</a>
     <a href="#pack-coverage">Pack coverage</a>
     <a href="#source-files">Source files</a>
+    <a href="#metric-algorithms">Metric algorithms</a>
   </div>
 
   <h2 id="syndrome-matrix">Syndrome matrix</h2>
+  <p class="meta">Scoring algorithms &amp; determinism tags:
+    see <code>docs/appendices/METRIC_ALGORITHMS.md</code>
+    (<code>python scripts/generate_metric_appendix.py</code>).</p>
   <div class="panel">
     <table>
       <thead><tr><th class="corner">Syndrome</th>{th_models()}</tr></thead>
@@ -1438,6 +1625,8 @@ def build_html(
       </ul>
     </div>
   </details>
+
+  {metric_algorithms_html}
 
   <footer>DSM-AE comparison</footer>
   <div id="cell-tip" role="tooltip" hidden></div>

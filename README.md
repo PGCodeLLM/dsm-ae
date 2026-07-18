@@ -231,3 +231,7 @@ pytest -v
 ## Disclaimer
 
 DSM-AE borrows **structure** from clinical diagnostic manuals for engineering systems. It does not diagnose humans.
+
+## Metric algorithms (appendix)
+
+Per-syndrome scoring algorithms and determinism tags: [`docs/appendices/METRIC_ALGORITHMS.md`](docs/appendices/METRIC_ALGORITHMS.md).

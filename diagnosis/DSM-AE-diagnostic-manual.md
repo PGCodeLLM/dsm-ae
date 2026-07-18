@@ -283,3 +283,8 @@ Hello-protocol tests **MC-*** (initialization meta-cognition) only. DSM-AE embed
 - v0.1: survey-derived taxonomy + draft criteria  
 - v0.2 target: IAA study on 50 traces; threshold calibration  
 - v1.0 target: locked battery + LiteLLM harness + published norms
+
+
+## Metric algorithms
+
+See [`docs/appendices/METRIC_ALGORITHMS.md`](../docs/appendices/METRIC_ALGORITHMS.md) for each syndrome metric, determinism class, and code anchors.

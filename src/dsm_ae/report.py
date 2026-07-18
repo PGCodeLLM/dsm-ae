@@ -58,6 +58,12 @@ def render_markdown(report: DiagnosisReport) -> str:
 
     lines.append("## Findings (syndromes / patterns)")
     lines.append("")
+    lines.append(
+        "Metric scoring algorithms (deterministic tags + code anchors): "
+        "`docs/appendices/METRIC_ALGORITHMS.md` "
+        "(regenerate: `python scripts/generate_metric_appendix.py`)."
+    )
+    lines.append("")
     for f in report.findings:
         mark = "PRESENT" if f.present else "absent"
         lines.append(f"### `{f.code}` — {f.name} [{mark}]")
@@ -65,6 +71,9 @@ def render_markdown(report: DiagnosisReport) -> str:
         lines.append(f"- **Severity:** {f.severity}")
         lines.append(f"- **Rationale:** {f.rationale}")
         lines.append(f"- **Linked metrics:** {', '.join(f'`{m}`' for m in f.linked_metrics)}")
+        lines.append(
+            f"- **Algorithms:** [`METRIC_ALGORITHMS.md` § {f.code}](../docs/appendices/METRIC_ALGORITHMS.md)"
+        )
         lines.append("")
 
     lines.append("## Bootstrap detail (explainable)")
