@@ -2,12 +2,13 @@ schema_version = "1.3"
 
 [task]
 name = "dsm-ae/hello_metacog"
-description = "Session-init meta-cognition protocol (DSM-AE hello_metacog)"
-keywords = ["dsm-ae", "syndrome", "MCD", "hello"]
+description = "DSM-AE indicator: Hello / Contract Meta-Cognition Indicator"
+keywords = ['dsm-ae', 'syndrome', 'MCD']
 
 [metadata]
 dsm_ae_pack = "hello_metacog"
-syndrome_codes = ["MCD"]
+syndrome_codes = ['MCD']
+primary_metrics = ['files_read_complete', 'project_specific_stops', 'synthesis_not_enumeration', 'mood_authenticity', 'ready_phrase', 'protocol_success']
 category = "agentic-behavior"
 
 [verifier]

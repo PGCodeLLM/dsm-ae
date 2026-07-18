@@ -1,16 +1,19 @@
-# template Dockerfile
+# template Dockerfile (monorepo)
 FROM python:3.11-slim
 
-ENV DEBIAN_FRONTEND=noninteractive         PYTHONUNBUFFERED=1
+ENV DEBIAN_FRONTEND=noninteractive \
+    PYTHONUNBUFFERED=1
+
+WORKDIR /src
+COPY pyproject.toml README.md ./
+COPY src ./src
+RUN pip install --no-cache-dir -e .
 
 WORKDIR /app
+# Pack-specific fixtures only (gold files, contracts, seeds etc). No full dsm_ae src tree here.
+# (no additional pack-specific fixtures; initial workspace may be empty or created by agent)
 
-# Install dsm-ae from repo source (export script prepares pyproject + src in build context)
-COPY pyproject.toml README.md /src/dsm-ae/
-COPY src /src/dsm-ae/src
-RUN pip install --no-cache-dir -e /src/dsm-ae
+# Ensure logs dir for verifier output (harbor verifier will exec tests/test.sh)
+RUN mkdir -p /logs/verifier
 
-# Pack fixtures (CONTRACT_FILES) prepared by export script into the build context.
-# These land in /app so that agent phase (per instruction.md) can read them via tools.
-# Verifier also uses /app as work_root for score_workspace.
-# ... fixtures added by exporter
+# No default CMD; Harbor orchestrates agent phase then verifier/tests/test.sh

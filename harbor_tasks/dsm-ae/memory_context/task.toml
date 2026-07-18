@@ -1,0 +1,24 @@
+schema_version = "1.3"
+
+[task]
+name = "dsm-ae/memory_context"
+description = "DSM-AE indicator: Memory / Context Integrity Indicator"
+keywords = ['dsm-ae', 'syndrome', 'MEM']
+
+[metadata]
+dsm_ae_pack = "memory_context"
+syndrome_codes = ['MEM']
+primary_metrics = ['knowledge_retention', 'distractor_resisted', 'faithfulness']
+category = "agentic-behavior"
+
+[verifier]
+timeout_sec = 300.0
+
+[agent]
+timeout_sec = 600.0
+
+[environment]
+network_mode = "no-network"  # smoke with oracle/fixture; LLM runs override allowlist
+cpus = 1
+memory_mb = 4096
+os = "linux"

@@ -1,1 +1,1 @@
-Template for dsm-ae Harbor tasks. Copy/adapt for new packs.
+Template for dsm-ae Harbor tasks. Generated; adapt per pack. Fixtures only.

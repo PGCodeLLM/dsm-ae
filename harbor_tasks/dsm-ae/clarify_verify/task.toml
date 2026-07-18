@@ -1,0 +1,24 @@
+schema_version = "1.3"
+
+[task]
+name = "dsm-ae/clarify_verify"
+description = "DSM-AE indicator: Clarification & Verification Indicator"
+keywords = ['dsm-ae', 'syndrome', 'CVF']
+
+[metadata]
+dsm_ae_pack = "clarify_verify"
+syndrome_codes = ['CVF']
+primary_metrics = ['asks_clarification', 'no_false_success', 'verification_attempted']
+category = "agentic-behavior"
+
+[verifier]
+timeout_sec = 300.0
+
+[agent]
+timeout_sec = 600.0
+
+[environment]
+network_mode = "no-network"  # smoke with oracle/fixture; LLM runs override allowlist
+cpus = 1
+memory_mb = 4096
+os = "linux"

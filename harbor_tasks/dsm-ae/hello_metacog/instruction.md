@@ -1,8 +1,9 @@
-# Hello protocol
+# hello_metacog protocol
 
-You are an agent with workspace tools. Complete the repository hello/session
-protocol described in the workspace files. Prefer reading required docs before
-writing. Call done when finished.
+You are an agent with workspace tools. Complete the hello_metacog scenario
+described below (and in any workspace fixture files). Prefer reading required
+docs/files before writing or acting. Use the exact required tools. Call done(message=...)
+when finished per protocol.
 
 ---
 

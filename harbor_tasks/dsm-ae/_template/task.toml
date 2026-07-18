@@ -2,12 +2,13 @@ schema_version = "1.3"
 
 [task]
 name = "dsm-ae/{{pack_id}}"
-description = "Session-init meta-cognition protocol (DSM-AE {{pack_id}})"
-keywords = ["dsm-ae", "syndrome", "MCD", "hello"]
+description = "DSM-AE indicator: {{pack}}"
+keywords = ['dsm-ae', 'syndrome', '{{SYN}}']
 
 [metadata]
 dsm_ae_pack = "{{pack_id}}"
-syndrome_codes = ["MCD"]
+syndrome_codes = ['{{SYN}}']
+primary_metrics = ['{{metric}}']
 category = "agentic-behavior"
 
 [verifier]

@@ -1,3 +1,3 @@
 # {{pack}} instruction placeholder
 
-See hello_metacog for example.
+See a real pack for SYSTEM-derived content.

@@ -1,6 +1,6 @@
-"""TDD test for harbor export script (Task 2).
+"""TDD test for harbor export script (Task 2/3).
 
-Written before the script and generated task files exist.
+Task 3: bulk export_all over list_packs; no src vendoring; test for hello + tool_integrity_tier2.
 """
 from pathlib import Path
 import pytest
@@ -62,3 +62,50 @@ def test_export_skips_live_harbor_when_no_cli():
         # Expected in this env; we verified file gen + verifier logic instead of `harbor run -a oracle`
         assert True
     pass
+
+
+def test_export_all_creates_task_toml(tmp_path: Path):
+    """Task 3 requirement: export_all creates task.toml for hello_metacog AND tool_integrity_tier2.
+    Uses dsm-ae/ subdir layout under provided out_dir.
+    """
+    import importlib.util
+
+    root = Path(__file__).resolve().parents[1]
+    script_path = root / "scripts" / "harbor_export_all_packs.py"
+
+    spec = importlib.util.spec_from_file_location("harbor_export_mod", script_path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+
+    export_all = getattr(mod, "export_all", None)
+    assert export_all is not None, "export_all must be exposed"
+
+    out_dir = tmp_path / "harbor_bulk"
+    created = export_all(out_dir)
+
+    # per requirement (adjusted for dsm-ae/ layout used by script + docs)
+    hello_toml = out_dir / "dsm-ae" / "hello_metacog" / "task.toml"
+    tid2_toml = out_dir / "dsm-ae" / "tool_integrity_tier2" / "task.toml"
+    assert hello_toml.is_file(), "expected hello_metacog task.toml"
+    assert tid2_toml.is_file(), "expected tool_integrity_tier2 task.toml"
+
+    # spot check structure for one: no vendored src, has fixtures subdir + new Dockerfile style
+    hello_dir = hello_toml.parent
+    assert (hello_dir / "environment" / "Dockerfile").is_file()
+    assert (hello_dir / "tests" / "test.sh").is_file()
+    # fixtures/ exists (may be emptyish or have .gitkeep + contracts)
+    assert (hello_dir / "environment" / "fixtures").is_dir()
+
+    # test.sh generic
+    test_sh = (tid2_toml.parent / "tests" / "test.sh").read_text()
+    assert "score_workspace" in test_sh
+    assert "tool_integrity_tier2" in test_sh
+    assert "/logs/verifier/reward.json" in test_sh
+
+    # Dockerfile uses monorepo COPY, no vendored /src inside task env
+    df = (hello_dir / "environment" / "Dockerfile").read_text()
+    assert "COPY pyproject.toml README.md ./" in df
+    assert "COPY src ./src" in df
+    assert "harbor_tasks/dsm-ae/" in df  # fixtures COPY uses context path
+    # should not have old vendored copy style inside the task tree
+    assert "COPY src /src/dsm-ae/src" not in df

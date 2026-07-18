@@ -1,0 +1,24 @@
+schema_version = "1.3"
+
+[task]
+name = "dsm-ae/loop_control"
+description = "DSM-AE indicator: Loop / Premature-Stop Control Indicator"
+keywords = ['dsm-ae', 'syndrome', 'PCD']
+
+[metadata]
+dsm_ae_pack = "loop_control"
+syndrome_codes = ['PCD']
+primary_metrics = ['all_files_read', 'premature_stop_avoided', 'no_read_loop', 'count_correct']
+category = "agentic-behavior"
+
+[verifier]
+timeout_sec = 300.0
+
+[agent]
+timeout_sec = 600.0
+
+[environment]
+network_mode = "no-network"  # smoke with oracle/fixture; LLM runs override allowlist
+cpus = 1
+memory_mb = 4096
+os = "linux"
