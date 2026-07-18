@@ -266,12 +266,26 @@ def queue_enqueue(
     full_suite: bool = typer.Option(False, "--full-suite", help="Enqueue all registered packs"),
     priority: int = typer.Option(0, "--priority"),
     label: Optional[str] = typer.Option(None, "--label"),
+    runner: Optional[str] = typer.Option(
+        None,
+        "--runner",
+        help="Execution path: default diagnose, or 'harbor' for Harbor pack bridge + queue progress",
+    ),
     db: Path = typer.Option(_DEFAULT_DB, "--db", help="SQLite queue database path"),
 ) -> None:
-    """Enqueue a single diagnosis job."""
+    """Enqueue a single diagnosis job.
+
+    Use ``--runner harbor`` for Harbor-style pack×trial outer loop with the same
+    Queue UI progress bar (done/total/percent). Prefer ``--k 10 --full-suite`` for
+    variance comparable to other multi-trial models.
+    """
+    from dsm_ae.queue.progress import progress_path_for, write_progress
     from dsm_ae.queue.store import JobStore
 
     pack_list = _parse_packs(packs, full_suite)
+    extra = None
+    if runner:
+        extra = {"runner": runner.strip().lower()}
     store = JobStore(db)
     jid = store.enqueue(
         model=model,
@@ -281,8 +295,32 @@ def queue_enqueue(
         rpm=rpm,
         priority=priority,
         label=label,
+        extra=extra,
     )
-    console.print(f"enqueued [bold]{jid}[/bold] model={model}")
+    # Seed progress file so the Queue indicator shows the job immediately.
+    reports = Path("reports")
+    prog = progress_path_for(reports, jid)
+    store.update_paths(jid, progress_path=str(prog))
+    write_progress(
+        prog,
+        {
+            "job_id": jid,
+            "model": model,
+            "runner": (runner or "diagnose"),
+            "phase": "queued",
+            "status": "queued",
+            "done": 0,
+            "total": 0,
+            "message": "Queued — waiting for worker"
+            + (f" (runner={runner})" if runner else ""),
+            "k": k,
+            "packs": pack_list,
+        },
+    )
+    console.print(
+        f"enqueued [bold]{jid}[/bold] model={model} k={k}"
+        + (f" runner={runner}" if runner else "")
+    )
 
 
 @queue_app.command("enqueue-batch")

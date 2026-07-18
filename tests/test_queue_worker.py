@@ -264,3 +264,60 @@ def test_successful_job_rebuilds_matrix_html(tmp_path: Path):
     prog = json.loads(Path(job.progress_path or progress_path_for(reports, jid)).read_text())
     assert prog.get("status") == "succeeded"
     assert "matrix" in (prog.get("message") or "").lower() or prog.get("matrix")
+
+
+def test_run_one_harbor_mock(tmp_path: Path, monkeypatch):
+    """Queue job with extra.runner=harbor uses Harbor path + queue progress."""
+    calls = []
+
+    def fake_cleanup(job_id, **kw):
+        calls.append(job_id)
+        return {"containers_removed": 0, "job_id": job_id, "docker_available": False}
+
+    monkeypatch.setattr("dsm_ae.harbor.runner.cleanup_docker_for_job", fake_cleanup)
+
+    db = tmp_path / "q.db"
+    reports = tmp_path / "reports"
+    store = JobStore(db)
+    jid = store.enqueue(
+        model="mock/well_attuned",
+        packs=["hello_metacog", "overeager_mini"],
+        k=2,
+        label="harbor-test",
+        extra={"runner": "harbor"},
+    )
+    ok = run_one(
+        store,
+        worker_id="h",
+        reports_dir=reports,
+        models_yaml=None,
+        rebuild_html=False,
+    )
+    assert ok is True
+    job = store.get(jid)
+    assert job is not None
+    assert job.status == JobStatus.SUCCEEDED
+    assert job.out_json is not None
+    assert Path(job.out_json).is_file()
+    # progress under queue path
+    assert job.progress_path is not None
+    prog = Path(job.progress_path)
+    assert prog.is_file()
+    import json
+
+    data = json.loads(prog.read_text())
+    assert data.get("runner") == "harbor"
+    assert data.get("status") == "succeeded"
+    assert data.get("done") == 4  # 2 packs × k=2
+    assert data.get("total") == 4
+    # harbor rewards exist
+    rew = reports / "harbor_runs" / jid / "rewards"
+    assert (rew / "hello_metacog__t0.json").is_file()
+    assert (rew / "overeager_mini__t1.json").is_file()
+    # import promotion
+    imports = list((reports / "harbor_imports").glob("*_import_report.json"))
+    assert imports
+    rep = json.loads(Path(job.out_json).read_text())
+    mids = {g.get("metric_id") for g in rep.get("gates") or []}
+    # underscore ids (not dotted ghosts)
+    assert not any("." in m and not m.endswith((".tier1", ".tier2", ".tier3")) for m in mids if m)

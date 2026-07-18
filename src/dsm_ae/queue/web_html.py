@@ -529,7 +529,14 @@ def render_queue_page(store: JobStore, href: Href, auth_required: bool, title: s
       return '<div class="prog">—</div>';
     }}
     const pct = (p.percent != null) ? p.percent : (p.total ? Math.round(100*(p.done||0)/p.total) : 0);
-    return '<div class="prog">' + esc(String(pct)) + "% · " + esc(p.message || "") +
+    const frac = (p.total != null && p.total > 0)
+      ? (' ' + (p.done||0) + '/' + p.total)
+      : '';
+    const harbor = (p.runner === "harbor")
+      ? (' · harbor' + (p.current_pack ? (' ' + p.current_pack + (p.current_trial != null ? (' t'+(p.current_trial+1)) : '')) : ''))
+      : '';
+    return '<div class="prog">' + esc(String(pct)) + '%' + esc(frac) + harbor +
+      ' · ' + esc(p.message || "") +
       '<div class="prog-bar"><i style="width:' + pct + '%"></i></div></div>';
   }}
 

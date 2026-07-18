@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from dsm_ae.diagnose import diagnose
+from dsm_ae.queue.models import EvalJob
 from dsm_ae.queue.paths import job_report_paths
 from dsm_ae.queue.progress import (
     progress_path_for,
@@ -98,6 +99,23 @@ def run_one(
         if context_bloat is None and extra.get("bloat_level") is not None:
             context_bloat = float(extra.pop("bloat_level"))
         treatment = extra.pop("treatment", None)
+        # Harbor path: outer k-trial pack runner with queue progress indicator.
+        runner = str(extra.pop("runner", "") or "").strip().lower()
+        if runner == "harbor" or extra.pop("harbor", False) is True:
+            return _run_harbor_job(
+                store,
+                job=job,
+                worker_id=worker_id,
+                reports_dir=reports_dir,
+                models_yaml=models_yaml,
+                prog_path=prog_path,
+                md_path=md_path,
+                json_path=json_path,
+                rebuild_html=rebuild_html,
+                matrix_out=matrix_out,
+                force_rerun=bool(extra.pop("force_rerun", False)),
+            )
+
         # Remaining extra → LiteLLM client params only
         client_extra = extra or None
 
@@ -195,6 +213,184 @@ def run_one(
                 "phase": "failed",
                 "status": "failed",
                 "message": err.splitlines()[-1] if err else "failed",
+                "error": err[:2000],
+            },
+        )
+        return False
+
+
+def _run_harbor_job(
+    store: JobStore,
+    *,
+    job: EvalJob,
+    worker_id: str,
+    reports_dir: Path,
+    models_yaml: Path | None,
+    prog_path: Path,
+    md_path: Path,
+    json_path: Path,
+    rebuild_html: bool,
+    matrix_out: Path | None,
+    force_rerun: bool = False,
+) -> bool:
+    """Execute a queue job via Harbor pack bridge (k trials × packs).
+
+    Progress is dual-written to the queue progress path (UI indicator) and
+    ``reports/harbor_runs/{job_id}/progress.json``. On success, rewards are
+    imported into a DiagnosisReport-shaped JSON under the job's out_json path
+    and into ``reports/harbor_imports/`` for matrix pooling.
+    """
+    # Import lazily so diagnose-only workers don't require scripts/ on path.
+    scripts_dir = Path(__file__).resolve().parents[3] / "scripts"
+    if scripts_dir.is_dir() and str(scripts_dir) not in sys.path:
+        sys.path.insert(0, str(scripts_dir))
+    from harbor_run_job import run_harbor_job  # type: ignore
+    from dsm_ae.harbor.import_rewards import reward_dir_to_report
+    from dsm_ae.models import DiagnosisReport
+    from dsm_ae.packs.registry import list_packs
+
+    packs = list(job.packs) if job.packs else list_packs()
+    total = max(1, len(packs) * max(1, int(job.k)))
+    harbor_root = reports_dir / "harbor_runs" / job.id
+    harbor_prog = harbor_root / "progress.json"
+    # Keep work_dir pointing at harbor tree for resume/debug.
+    store.update_paths(job.id, work_dir=str(harbor_root), progress_path=str(prog_path))
+
+    write_progress(
+        prog_path,
+        {
+            "job_id": job.id,
+            "model": job.model,
+            "runner": "harbor",
+            "phase": "harbor",
+            "status": "running",
+            "done": 0,
+            "total": total,
+            "message": f"Harbor claimed by {worker_id} — {len(packs)} packs × k={job.k}",
+            "packs": packs,
+            "k": job.k,
+        },
+    )
+
+    try:
+        root = run_harbor_job(
+            job_id=job.id,
+            model=job.model,
+            packs=packs,
+            k=int(job.k),
+            reports_dir=reports_dir,
+            models_yaml=models_yaml if models_yaml and models_yaml.is_file() else None,
+            force_rerun=force_rerun,
+            progress_paths=[prog_path, harbor_prog],
+            extra_meta={
+                "queue_job_id": job.id,
+                "label": job.label,
+                "worker_id": worker_id,
+            },
+        )
+
+        write_progress(
+            prog_path,
+            {
+                "job_id": job.id,
+                "model": job.model,
+                "runner": "harbor",
+                "phase": "import",
+                "status": "running",
+                "done": total,
+                "total": total,
+                "message": "Importing Harbor rewards → diagnosis report…",
+            },
+        )
+        rep = reward_dir_to_report(root, model=job.model, k=int(job.k))
+        rep.setdefault("notes", []).append(f"queue_job_id={job.id}")
+        rep.setdefault("notes", []).append(f"runner=harbor k={job.k}")
+
+        md_path.parent.mkdir(parents=True, exist_ok=True)
+        json_path.parent.mkdir(parents=True, exist_ok=True)
+        json_path.write_text(json.dumps(rep, indent=2, default=str), encoding="utf-8")
+        try:
+            md_path.write_text(
+                render_markdown(DiagnosisReport.model_validate(rep)),
+                encoding="utf-8",
+            )
+        except Exception:
+            md_path.write_text(
+                f"# Harbor import — {job.model}\n\n"
+                f"packs={packs}\nk={job.k}\njob={job.id}\n\n"
+                f"gates={len(rep.get('gates') or [])} "
+                f"findings={len(rep.get('findings') or [])}\n",
+                encoding="utf-8",
+            )
+
+        # Promote for matrix pooling (harbor_runs/ is gitignored / ephemeral)
+        imports_dir = reports_dir / "harbor_imports"
+        imports_dir.mkdir(parents=True, exist_ok=True)
+        import_copy = imports_dir / f"{job.id[:8]}_import_report.json"
+        import_copy.write_text(
+            json.dumps(rep, indent=2, default=str), encoding="utf-8"
+        )
+
+        store.mark_succeeded(job.id, out_md=str(md_path), out_json=str(json_path))
+
+        matrix_msg = "matrix rebuild skipped"
+        matrix_paths: list[str] = []
+        if rebuild_html:
+            write_progress(
+                prog_path,
+                {
+                    "job_id": job.id,
+                    "model": job.model,
+                    "runner": "harbor",
+                    "phase": "scoring",
+                    "status": "succeeded",
+                    "done": total,
+                    "total": total,
+                    "percent": 100.0,
+                    "message": "Harbor complete — rebuilding matrix HTML…",
+                    "out_json": str(json_path),
+                    "harbor_root": str(root),
+                },
+            )
+            ok_matrix, matrix_paths = _rebuild_matrix(reports_dir, matrix_out)
+            matrix_msg = (
+                f"matrix updated ({', '.join(matrix_paths)})"
+                if ok_matrix
+                else "matrix rebuild failed (see serve log)"
+            )
+
+        write_progress(
+            prog_path,
+            {
+                "job_id": job.id,
+                "model": job.model,
+                "runner": "harbor",
+                "phase": "done",
+                "status": "succeeded",
+                "done": total,
+                "total": total,
+                "percent": 100.0,
+                "message": f"Harbor k={job.k} complete; {matrix_msg}",
+                "out_json": str(json_path),
+                "out_md": str(md_path),
+                "harbor_root": str(root),
+                "import_copy": str(import_copy),
+                "matrix": matrix_paths,
+            },
+        )
+        return True
+    except Exception:
+        err = traceback.format_exc()
+        store.mark_failed(job.id, err)
+        write_progress(
+            prog_path,
+            {
+                "job_id": job.id,
+                "model": job.model,
+                "runner": "harbor",
+                "phase": "failed",
+                "status": "failed",
+                "message": err.splitlines()[-1] if err else "harbor failed",
                 "error": err[:2000],
             },
         )
