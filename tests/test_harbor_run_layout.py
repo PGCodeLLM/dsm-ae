@@ -20,7 +20,8 @@ from dsm_ae.harbor.run_layout import (
 def test_harbor_run_dir_layout(tmp_path: Path):
     """Core layout from global constraints."""
     from dsm_ae.harbor.run_layout import init_run, persist_reward, persist_trajectory
-    root = init_run(tmp_path, "abc12def", model="mock/well_attuned", packs=["hello_metacog"])
+    # use base= for test override (direct parent); default would be reports/harbor_runs/
+    root = init_run("abc12def", base=tmp_path, model="mock/well_attuned", packs=["hello_metacog"])
     # direct under passed base in tests (layout root is conventionally reports/harbor_runs)
     assert root.name == "abc12def"
     assert (root / "meta.json").is_file()
@@ -52,7 +53,7 @@ def test_harbor_run_dir_layout(tmp_path: Path):
 
 
 def test_persist_logs_and_finalize(tmp_path: Path):
-    root = init_run(tmp_path, "jobxyz", model="x", packs=[])
+    root = init_run("jobxyz", base=tmp_path, model="x", packs=[])
     log_src = tmp_path / "logs_in"
     log_src.mkdir()
     (log_src / "verifier.log").write_text("ok")
@@ -65,10 +66,10 @@ def test_persist_logs_and_finalize(tmp_path: Path):
 
 
 def test_harbor_run_dir_helper(tmp_path: Path):
-    d = harbor_run_dir(tmp_path, "j1234567")
+    d = harbor_run_dir("j1234567", base=tmp_path)
     assert d == tmp_path / "j1234567"
-    # In test sandbox we place directly under tmp_path (caller controls reports/harbor_runs nesting);
-    # real calls can do harbor_run_dir(reports_dir / "harbor_runs", job) to match global layout verbatim.
+    # With base= (test override), direct under it. Default (no base): reports/harbor_runs/{job}
+    # e.g. harbor_run_dir("job", reports_dir=Path("reports")) -> reports/harbor_runs/job
     assert d.name == "j1234567"
 
 

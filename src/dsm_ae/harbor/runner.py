@@ -13,6 +13,7 @@ Usage skeleton (for queue integration later):
         ...
 
     run_harbor_task(job_id=..., model=..., packs=..., task_fn=...)
+    # defaults to reports/harbor_runs/{job_id}; pass base=tmp or run_dir_base=... for tests/override
 
 The runner itself does NOT invoke `harbor` binary yet (Task 2+); it manages layout + guaranteed cleanup.
 """
@@ -20,6 +21,7 @@ from __future__ import annotations
 
 import json
 import traceback
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
 
@@ -39,7 +41,9 @@ def run_harbor_task(
     job_id: str,
     model: str,
     packs: list[str],
-    run_dir_base: Path,
+    run_dir_base: Path | None = None,
+    reports_dir: Path | None = None,
+    base: Path | None = None,
     task_fn: Callable[[Path], Any] | None = None,
     # optional artifact sources for persist (used by caller after real harbor exec)
     reward: dict[str, Any] | None = None,
@@ -53,6 +57,9 @@ def run_harbor_task(
 
     Returns the run dir Path under harbor_runs layout.
 
+    Defaults to reports/harbor_runs/{job_id} (via harbor_run_dir). For tests use
+    run_dir_base=... or base=... (treated as direct parent of {job_id}).
+
     Cleanup is performed in finally even if task_fn raises or docker absent.
     docker_cleanup.json is always written (may contain "docker_available": false).
 
@@ -61,8 +68,17 @@ def run_harbor_task(
         # or harbor CLI equivalent label support (passed through env or --label if supported)
         # The runner does not start containers; the invoker must pass the label using job_id.
     """
-    base = Path(run_dir_base)
-    root = init_run(base, job_id, model=model, packs=packs, **(extra_meta or {}))
+    # resolve override: base or legacy run_dir_base means "direct parent for job dir" (test compat)
+    # if neither, init_run + harbor_run_dir default to reports/harbor_runs/{job_id}
+    override_base = base or run_dir_base
+    root = init_run(
+        job_id,
+        reports_dir=reports_dir,
+        base=override_base,
+        model=model,
+        packs=packs,
+        **(extra_meta or {}),
+    )
     cleanup_info: dict[str, Any] = {}
 
     try:
@@ -83,12 +99,14 @@ def run_harbor_task(
         if logs_dir is not None:
             persist_logs(root, logs_dir)
 
-        finalize_meta(root, {"status": "succeeded", "ended_at": None})  # finalize will set ts
+        end_ts = datetime.now(timezone.utc).isoformat()
+        finalize_meta(root, {"status": "succeeded", "ended_at": end_ts})  # runner records real end time
 
     except Exception:
         # record failure but proceed to cleanup
         tb = traceback.format_exc()
-        finalize_meta(root, {"status": "failed", "error": tb[:2000], "ended_at": None})
+        end_ts = datetime.now(timezone.utc).isoformat()
+        finalize_meta(root, {"status": "failed", "error": tb[:2000], "ended_at": end_ts})
         raise
     finally:
         # ALWAYS cleanup

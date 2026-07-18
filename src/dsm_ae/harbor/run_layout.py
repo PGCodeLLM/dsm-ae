@@ -27,18 +27,25 @@ def _safe_name(name: str) -> str:
     return "".join(c if c.isalnum() or c in ("_", "-", ".") else "_" for c in str(name))
 
 
-def harbor_run_dir(base: Path, job_id: str) -> Path:
-    """Return Path for the job run dir. In usage: base=reports_dir or reports/harbor_runs.
+def harbor_run_dir(job_id: str, *, reports_dir: Path | None = None, base: Path | None = None) -> Path:
+    """Return the harbor run dir for a job_id under the canonical layout.
 
-    For tests, often called with tmp_path so job sits directly under (caller controls).
-    Real usage will typically pass reports_dir; layout docs specify harbor_runs/ subdir.
+    Default resolution (per global constraint):
+        {reports_dir or Path("reports")}/harbor_runs/{job_id}
+
+    Optional override for tests:
+        - `base=some_path`: if provided, `some_path` is used as the direct parent of {job_id}
+          (i.e. returns base / job_id). This keeps test sandboxes simple (tmp_path/jobid)
+          without forcing reports/harbor_runs nesting. `base` takes precedence over reports_dir.
+
+    Callers (init_run, run_harbor_task) now default to correct reports/harbor_runs layout
+    without hand-composing paths.
     """
-    base = Path(base)
     jid = _safe_name(job_id)[:64] or "job"
-    # Do not force /harbor_runs here to keep tests using tmp as sandbox happy;
-    # callers that want strict reports/harbor_runs pass base=reports_dir / "harbor_runs"
-    # or we can detect. For now keep simple and match brief/tests.
-    return base / jid
+    if base is not None:
+        return Path(base) / jid
+    rd = Path(reports_dir) if reports_dir is not None else Path("reports")
+    return rd / "harbor_runs" / jid
 
 
 def _write_json(path: Path, obj: Any) -> None:
@@ -49,18 +56,23 @@ def _write_json(path: Path, obj: Any) -> None:
 
 
 def init_run(
-    base: Path,
     job_id: str,
     *,
+    reports_dir: Path | None = None,
+    base: Path | None = None,
     model: str = "",
     packs: list[str] | None = None,
     **extra_meta: Any,
 ) -> Path:
-    """Initialize harbor_runs/{job_id} layout under base (or base as harbor_runs root).
+    """Initialize the {job_id} layout under reports/harbor_runs (default) or override.
 
+    Uses harbor_run_dir(job_id, reports_dir=..., base=...) so default callers get
+    reports/harbor_runs/{job_id}/ without composing paths manually.
+
+    `base` (if given) is treated as the direct parent dir for {job_id} (test override).
     Writes meta.json. Returns the job root Path.
     """
-    root = harbor_run_dir(base, job_id)
+    root = harbor_run_dir(job_id, reports_dir=reports_dir, base=base)
     root.mkdir(parents=True, exist_ok=True)
 
     meta = {
@@ -164,6 +176,9 @@ def finalize_meta(root: Path, updates: dict[str, Any]) -> None:
         except Exception:
             pass
     meta.update(updates or {})
-    if "ended_at" not in meta and "status" in (updates or {}):
-        meta.setdefault("ended_at", _now_iso())
+    # Fix: set ended_at to ISO UTC when missing or explicitly None (the guard "not in"
+    # was defeated when runner passed "ended_at": None). Only set on terminal status updates.
+    if meta.get("ended_at") in (None, "") or "ended_at" not in meta:
+        if "status" in (updates or {}) or "status" in meta:
+            meta["ended_at"] = _now_iso()
     _write_json(meta_path, meta)
