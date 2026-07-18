@@ -36,17 +36,58 @@ from dsm_ae.metrics.bootstrap import bootstrap_metric, build_gate_matrix
 from dsm_ae.models import MetricResult
 from dsm_ae.packs.registry import list_packs
 
+# Tier suffixes written by pack_bridge.write_reward as "_" (metric dots → underscores).
+_TIER_SUFFIXES = ("tier1", "tier2", "tier3")
+
+
+def reward_key_to_metric_id(key: str) -> str:
+    """Inverse of ``write_reward``'s ``metric_id.replace(".", "_")``.
+
+    Only the *tier* segment uses a dot in canonical DSM-AE ids
+    (``task_tool_success.tier2``, ``erosion_indicator.tier1``). Everything else
+    keeps underscores (``acknowledges_sensitive``, ``files_read_complete``).
+
+    The previous importer naively did ``key.replace("_", ".")``, which produced
+    ghost metrics (``acknowledges.sensitive``) that broke criteria matching and
+    duplicated matrix rows next to the real underscore ids.
+    """
+    k = (key or "").strip()
+    if not k or k == "primary_pass":
+        return k
+    for tier in _TIER_SUFFIXES:
+        suffix = f"_{tier}"
+        if k.endswith(suffix):
+            return f"{k[: -len(suffix)]}.{tier}"
+    return k
+
+
+def normalize_metric_id(mid: str) -> str:
+    """Repair already-imported dotted ids and pass through canonical ones.
+
+    - ``acknowledges.sensitive`` → ``acknowledges_sensitive``
+    - ``critical.preserved.tier1`` → ``critical_preserved.tier1``
+    - ``task_tool_success.tier2`` → unchanged
+    - ``files_read_complete`` → unchanged
+    """
+    m = (mid or "").strip()
+    if not m or m == "primary_pass" or "." not in m:
+        return m
+    for tier in _TIER_SUFFIXES:
+        suffix = f".{tier}"
+        if m.endswith(suffix):
+            base = m[: -len(suffix)].replace(".", "_")
+            return f"{base}.{tier}"
+    return m.replace(".", "_")
+
 
 def _reward_to_metric_results(reward: dict[str, Any], pack_hint: str | None = None) -> list[MetricResult]:
     """Turn a single harbor reward dict (floats) into list of synthetic MetricResult.
 
     primary_pass is used to influence overall but per-metric we use the value.
-    Dots were replaced by _ in reward; we try to restore common ones for key metrics.
-    passed heuristic: for [0,1] values use >= 0.5 (or exact 1.0), for other floats use value > 0 .
-    This is sufficient to feed bootstrap for gates.
+    Reward keys use underscores (see write_reward); restore only ``.tierN`` dots.
+    passed heuristic: for [0,1] values use >= 0.5; for other floats use value > 0.
     """
     results: list[MetricResult] = []
-    primary = float(reward.get("primary_pass", 0.0))
 
     for key, val in reward.items():
         if key == "primary_pass":
@@ -65,15 +106,8 @@ def _reward_to_metric_results(reward: dict[str, Any], pack_hint: str | None = No
         if not isinstance(val, (int, float)):
             continue
         v = float(val)
-        # restore dots for known metric families
-        mid = key.replace("_", ".")
-        # common renames seen in rewards (e.g. task_tool_success.tier2 may be task_tool_success_tier2 )
-        if mid.endswith(".tier2") or "tier2" in mid:
-            mid = mid.replace("task_tool_success_tier2", "task_tool_success.tier2")
-        if mid.endswith(".tier1") or "tier1" in mid:
-            mid = mid.replace("task_tool_success_tier1", "task_tool_success.tier1")
+        mid = reward_key_to_metric_id(str(key))
         passed = bool(v >= 0.5) if v in (0.0, 1.0) or (0.0 <= v <= 1.0) else (v > 0.0)
-        # if primary was 0 force some fails? keep simple per-metric
         results.append(
             MetricResult(
                 metric_id=mid,

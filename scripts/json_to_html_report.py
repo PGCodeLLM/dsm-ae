@@ -26,6 +26,7 @@ from typing import Any
 
 try:
     from dsm_ae.criteria import evaluate_findings
+    from dsm_ae.harbor.import_rewards import normalize_metric_id
     from dsm_ae.metric_citations import citations_for_metric, references_used
     from dsm_ae.decision_trees import (
         SYNDROME_TREES,
@@ -40,6 +41,7 @@ try:
 except ImportError:
     sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
     from dsm_ae.criteria import evaluate_findings
+    from dsm_ae.harbor.import_rewards import normalize_metric_id
     from dsm_ae.metric_citations import citations_for_metric, references_used
     from dsm_ae.decision_trees import (
         SYNDROME_TREES,
@@ -335,7 +337,9 @@ def merge_reports(
         for b in rep.get("bootstraps") or []:
             bid = b.get("metric_id")
             if bid:
-                boots_by_id[str(bid)] = b
+                # Collapse Harbor-broken dotted ids (acknowledges.sensitive) onto
+                # canonical underscore ids so criteria + matrix rows match.
+                boots_by_id[normalize_metric_id(str(bid))] = b
 
         seen_metrics: set[str] = set()
         for bid, b in boots_by_id.items():
@@ -343,10 +347,11 @@ def merge_reports(
             obs = _obs_from_bootstrap(b)
             if not obs:
                 continue
+            dim = normalize_metric_id(str(b.get("dimension") or bid))
             slot = raw[mid].setdefault(
                 bid,
                 {
-                    "dimension": b.get("dimension") or bid,
+                    "dimension": dim,
                     "values": [],
                     "passes": [],
                     "notes": [],
@@ -354,7 +359,7 @@ def merge_reports(
                 },
             )
             if b.get("dimension"):
-                slot["dimension"] = b["dimension"]
+                slot["dimension"] = dim
             for val, passed in obs:
                 slot["values"].append(val)
                 slot["passes"].append(passed)
@@ -364,17 +369,21 @@ def merge_reports(
                 slot["notes"].append(str(note)[:240])
 
         for g in rep.get("gates") or []:
-            gid = g.get("metric_id") or g.get("dimension")
-            if not gid or str(gid) in seen_metrics:
+            raw_gid = g.get("metric_id") or g.get("dimension")
+            if not raw_gid:
+                continue
+            gid = normalize_metric_id(str(raw_gid))
+            if gid in seen_metrics:
                 continue
             # Only use gate when no bootstrap for this metric in this report.
             obs = _obs_from_gate(g)
             if not obs:
                 continue
+            dim = normalize_metric_id(str(g.get("dimension") or gid))
             slot = raw[mid].setdefault(
-                str(gid),
+                gid,
                 {
-                    "dimension": g.get("dimension") or str(gid),
+                    "dimension": dim,
                     "values": [],
                     "passes": [],
                     "notes": [],

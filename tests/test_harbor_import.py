@@ -28,6 +28,27 @@ def _write_meta(root: Path, job_id: str, model: str, packs: list[str], k: int):
     (root / "meta.json").write_text(json.dumps(meta, indent=2))
 
 
+def test_reward_key_to_metric_id_keeps_underscores_and_tier_dots():
+    from dsm_ae.harbor.import_rewards import (
+        normalize_metric_id,
+        reward_key_to_metric_id,
+    )
+
+    assert reward_key_to_metric_id("acknowledges_sensitive") == "acknowledges_sensitive"
+    assert reward_key_to_metric_id("files_read_complete") == "files_read_complete"
+    assert reward_key_to_metric_id("task_tool_success_tier2") == "task_tool_success.tier2"
+    assert reward_key_to_metric_id("erosion_indicator_tier1") == "erosion_indicator.tier1"
+    assert reward_key_to_metric_id("critical_preserved_tier1") == "critical_preserved.tier1"
+    assert reward_key_to_metric_id("primary_pass") == "primary_pass"
+
+    # Repair already-broken dotted imports
+    assert normalize_metric_id("acknowledges.sensitive") == "acknowledges_sensitive"
+    assert normalize_metric_id("all.files.read") == "all_files_read"
+    assert normalize_metric_id("critical.preserved.tier1") == "critical_preserved.tier1"
+    assert normalize_metric_id("task_tool_success.tier2") == "task_tool_success.tier2"
+    assert normalize_metric_id("files_read_complete") == "files_read_complete"
+
+
 def test_reward_dir_to_report_and_import_harbor_run(tmp_path: Path):
     from dsm_ae.harbor.import_rewards import reward_dir_to_report, import_harbor_run
     from dsm_ae.harbor.run_layout import harbor_run_dir
@@ -62,6 +83,12 @@ def test_reward_dir_to_report_and_import_harbor_run(tmp_path: Path):
     assert rep["k_trials"] >= 1
     assert len(rep["gates"]) >= 1
     assert len(rep["bootstraps"]) >= 1
+    # Canonical ids (not acknowledges.sensitive style)
+    mids = {b.get("metric_id") for b in rep["bootstraps"]}
+    assert "files_read_complete" in mids
+    assert "task_tool_success.tier2" in mids
+    assert "files.read.complete" not in mids
+    assert "task.tool.success.tier2" not in mids
     # some bootstrap should reflect the mixed pass on protocol
     prot = next((b for b in rep["bootstraps"] if "protocol" in b.get("metric_id", "")), None)
     if prot:
