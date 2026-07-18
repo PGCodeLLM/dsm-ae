@@ -30,7 +30,6 @@ try:
     from dsm_ae.decision_trees import (
         SYNDROME_TREES,
         PathwayResult,
-        TreeNode,
         evaluate_tree,
         gates_from_report_acc,
         tree_to_mermaid,
@@ -45,7 +44,6 @@ except ImportError:
     from dsm_ae.decision_trees import (
         SYNDROME_TREES,
         PathwayResult,
-        TreeNode,
         evaluate_tree,
         gates_from_report_acc,
         tree_to_mermaid,

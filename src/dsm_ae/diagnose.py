@@ -40,7 +40,6 @@ from dsm_ae.metrics.bootstrap import bootstrap_metric, build_gate_matrix
 from dsm_ae.models import DiagnosisReport, MetricResult, ScaffoldCard, TrialTrace
 from dsm_ae.packs.registry import get_pack, list_packs
 from dsm_ae.pool import RateLimiter, map_pool
-from dsm_ae.report import render_markdown
 from dsm_ae.trajectory_store import (
     CHECKPOINT_DIRNAME,
     TRAJECTORIES_DIRNAME,
@@ -49,16 +48,6 @@ from dsm_ae.trajectory_store import (
     litellm_log_path,
     load_trial_checkpoint,
     save_trial_artifacts,
-)
-
-# Re-export for tests / callers that imported from diagnose
-__all_traj__ = (
-    "CHECKPOINT_DIRNAME",
-    "TRAJECTORIES_DIRNAME",
-    "checkpoint_path",
-    "count_trial_checkpoints",
-    "load_trial_checkpoint",
-    "save_trial_artifacts",
 )
 
 
@@ -415,8 +404,3 @@ def diagnose(
         }
     )
     return report
-
-
-def diagnose_to_markdown(**kwargs: Any) -> tuple[DiagnosisReport, str]:
-    report = diagnose(**kwargs)
-    return report, render_markdown(report)

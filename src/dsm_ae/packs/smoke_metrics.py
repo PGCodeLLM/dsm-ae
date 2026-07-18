@@ -28,10 +28,6 @@ SMOKE_METRIC_IDS: frozenset[str] = frozenset(
 )
 
 SMOKE_BADGE = "SMOKE/FLOOR"
-SMOKE_NOTE = (
-    "Smoke/floor metric (tier1): saturates easily; not full CQ/AA diagnostic. "
-    "See docs/superpowers/specs/weak-metric-audits/."
-)
 
 
 def is_smoke_metric(metric_id: str) -> bool:
@@ -42,12 +38,6 @@ def is_smoke_metric(metric_id: str) -> bool:
     if mid.endswith(".tier1"):
         return True
     return False
-
-
-def smoke_prefix(metric_id: str) -> str:
-    if is_smoke_metric(metric_id):
-        return f"[{SMOKE_BADGE}] "
-    return ""
 
 
 def annotate_smoke_explanation(metric_id: str, explanation: str) -> str:

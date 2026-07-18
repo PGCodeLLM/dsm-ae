@@ -154,7 +154,7 @@ MODELS="gpt-5.6-terra gpt-5.6-sol" K=3 J=2 RPM=6 ./scripts/run_full_suite_via_qu
 SKIP_WORKER=1 ./scripts/run_full_suite_via_queue.sh gpt-5.6-luna
 ```
 
-Legacy offline loops (`scripts/run_full_suite_pangu.sh`, `run_full_suite_claude.sh`, …) still call `dsm-ae diagnose` directly; leave them for in-flight runs. New multi-model work should use the queue.
+Prefer the queue for multi-model work. One-off historical suite/repro shells were removed; use `scripts/run_full_suite_via_queue.sh` or `dsm-ae diagnose` / `dsm-ae queue`.
 
 `dsm-ae diagnose-batch --models a,b,c` remains available (sequential, no persistence). Prefer `queue enqueue-batch` + `worker` when you need pause/resume, status, or automatic matrix rebuilds.
 

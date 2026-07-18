@@ -56,7 +56,10 @@ corresponding **indicator pack** as a mini-testbed with **k=10 independent trial
 
 ```bash
 # Full matrix: 7 packs × 2 models × k=10
-./scripts/run_repro_shared_symptoms.sh
+# Historical sequential driver removed. Prefer:
+#   python3 scripts/run_repro_10_parallel_trials.py --help
+# or enqueue via `dsm-ae queue` / scripts/run_full_suite_via_queue.sh
+
 
 # Or single cell
 dsm-ae diagnose -m gpt-5.5 --models-yaml models.yaml \

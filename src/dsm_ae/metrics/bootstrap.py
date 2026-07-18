@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import math
 import statistics
-from collections import defaultdict
 
 from dsm_ae.models import (
     BootstrapStats,
@@ -103,13 +102,3 @@ def build_gate_matrix(bootstraps: list[BootstrapStats]) -> list[GateCell]:
             )
         )
     return cells
-
-
-def group_results(
-    scored: list[tuple[str, MetricResult]],
-) -> dict[str, list[MetricResult]]:
-    """Group (dimension_hint, MetricResult) by metric_id."""
-    g: dict[str, list[MetricResult]] = defaultdict(list)
-    for _dim, m in scored:
-        g[m.metric_id].append(m)
-    return g

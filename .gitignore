@@ -23,3 +23,9 @@ data/
 .env
 data/job_secrets/
 reports/queue/progress/
+# Large run workspaces (assembled diagnosis JSON/HTML is enough for the UI)
+reports/work/
+reports/bloat/**/work/
+reports/harbor_runs/
+reports/**/trajectories/
+reports/**/.dsm_ae_ckpt/

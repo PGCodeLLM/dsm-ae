@@ -4,10 +4,15 @@
 Writes:
   reports/bloat/bloat50/comparison.html
   reports/bloat/bloat50/{model}.json  (assembled from scores.json / checkpoints)
+  reports/bloat/bloat50/baseline_k10/{model}.json  (clean k=10 repro-shared only)
 
-Default models: those with checkpoints under reports/bloat/bloat50/work/.
-Default packs: only packs with full k checkpoints (excludes incomplete
-tool_integrity_tier2 until it finishes).
+**Baseline policy (v2 fair):** ONLY ``reports/repro-shared/{model}/**/trial_*.json``
+(k=10 mini-testbeds). Does **not** pool suite/queue/root historic runs
+(that dilution made bloat look better than it was).
+
+Default models: work/* when present, else pre-assembled reports/bloat/bloat50/*.json
+(after worktrees are purged). Default packs: only packs with full k checkpoints when
+re-assembling from work; otherwise packs from each assembled JSON.
 """
 from __future__ import annotations
 
@@ -178,6 +183,144 @@ def _metric_ids(rep: dict[str, Any]) -> set[str]:
     return ids
 
 
+
+def _pack_from_repro_dirname(name: str) -> str | None:
+    """Map RSD_sycophancy_mini_n10 → sycophancy_mini."""
+    # strip trailing _n10 / _nN
+    base = name
+    if "_n" in base:
+        base = base.rsplit("_n", 1)[0]
+    # known prefixes from summarize_repro / run scripts
+    prefixes = (
+        "CSO_", "CTX_", "CVF_", "EGD_", "GDD_", "ISDS2_", "ISDS3_", "ISDS_",
+        "MAH_", "MCD_", "MEM_", "MRC_", "MVF_", "NFR_", "OASD_", "PCD_", "PII_",
+        "RSD_", "SBG_", "TID2_", "TID_", "XPI_",
+    )
+    for p in prefixes:
+        if base.startswith(p):
+            return base[len(p):]
+    return base if base else None
+
+
+def load_repro_shared_k10_reports(
+    reports_dir: Path,
+    models: list[str],
+    *,
+    k: int = 10,
+) -> dict[str, list[dict[str, Any]]]:
+    """Load only clean k=10 repro-shared trial_*.json files per model.
+
+    Does not include suite/queue/root diagnosis JSONs.
+    """
+    repro_root = reports_dir / "repro-shared"
+    by_model: dict[str, list[dict[str, Any]]] = {}
+    if not repro_root.is_dir():
+        return by_model
+    for model in models:
+        mdir = repro_root / model
+        if not mdir.is_dir():
+            # try underscore variants
+            alt = repro_root / model.replace(".", "_")
+            mdir = alt if alt.is_dir() else mdir
+        if not mdir.is_dir():
+            continue
+        for pack_dir in sorted(mdir.iterdir()):
+            if not pack_dir.is_dir() or pack_dir.name.startswith("."):
+                continue
+            if f"_n{k}" not in pack_dir.name and not pack_dir.name.endswith(f"_n{k}"):
+                # require n10 style dirs
+                continue
+            trials = sorted(pack_dir.glob("trial_*.json"))
+            if len(trials) < k:
+                # allow partial but prefer full k
+                pass
+            for tp in trials:
+                rep = load_report(tp)
+                if not rep:
+                    continue
+                mid = model_id(rep)
+                # normalize to requested model name if scaffold missing
+                if mid not in models and mid.replace("_", ".") not in models:
+                    # force model label from directory
+                    card = dict(rep.get("scaffold_card") or {})
+                    card["model"] = model
+                    rep["scaffold_card"] = card
+                    mid = model
+                if mid not in models:
+                    # directory is source of truth for which model arm
+                    card = dict(rep.get("scaffold_card") or {})
+                    card["model"] = model
+                    rep["scaffold_card"] = card
+                    mid = model
+                by_model.setdefault(model, []).append(rep)
+    return by_model
+
+
+def assemble_baseline_k10_report(
+    model: str,
+    trial_reports: list[dict[str, Any]],
+    *,
+    k: int = 10,
+) -> dict[str, Any] | None:
+    """Merge only k=10 repro trial reports into one DiagnosisReport-shaped dict."""
+    if not trial_reports:
+        return None
+    # Use merge_reports then convert back to a single report-like dict for labeling
+    labeled = []
+    for r in trial_reports:
+        card = dict(r.get("scaffold_card") or {})
+        card["model"] = model
+        r = dict(r)
+        r["scaffold_card"] = card
+        labeled.append(r)
+    merged = merge_reports(labeled)
+    acc = merged.get(model)
+    if not acc:
+        return None
+    # gates may be dict after merge_reports path in by_model — rebuild list
+    gates = acc.get("gates") or {}
+    if isinstance(gates, dict):
+        gate_list = list(gates.values())
+    else:
+        gate_list = gates
+    boots = acc.get("bootstraps") or {}
+    if isinstance(boots, dict):
+        boot_list = list(boots.values())
+    else:
+        boot_list = boots
+    findings = acc.get("findings") or {}
+    if isinstance(findings, dict):
+        find_list = list(findings.values())
+    else:
+        find_list = findings
+    packs = sorted(acc.get("packs") or set())
+    return {
+        "run_id": str(uuid.uuid4()),
+        "scaffold_card": {
+            "model": model,
+            "scaffold": "raw",
+            "permission_mode": "default",
+            "k_trials": k,
+            "max_turns": 10,
+            "extra": {
+                "baseline_source": "repro-shared_k10_only",
+                "n_trial_files": len(trial_reports),
+            },
+        },
+        "packs": packs,
+        "k_trials": k,
+        "gates": gate_list,
+        "findings": find_list,
+        "bootstraps": boot_list,
+        "traces": [],
+        "notes": [
+            f"Clean k={k} baseline assembled only from reports/repro-shared/{model}/**/trial_*.json",
+            f"Trial files: {len(trial_reports)}",
+            "Does NOT include suite/queue/root historic pooling.",
+        ],
+    }
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--reports-dir", type=Path, default=Path("reports"))
@@ -189,23 +332,47 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="Include packs without full k checkpoints",
     )
+    ap.add_argument(
+        "--baseline-mode",
+        choices=("repro_k10", "all_reports"),
+        default="repro_k10",
+        help="Baseline source: clean repro-shared k=10 only (default) or legacy all reports/ pool",
+    )
     args = ap.parse_args(argv)
 
     reports_dir = args.reports_dir.resolve()
     tag = f"bloat{int(round(args.level * 100))}"
     bloat_root = reports_dir / "bloat" / tag
     work_root = bloat_root / "work"
-    if not work_root.is_dir():
-        print(f"No bloat work dir at {work_root}", file=sys.stderr)
-        return 1
+    has_work = work_root.is_dir()
 
     if args.models:
         models = [m.strip() for m in args.models.split(",") if m.strip()]
-    else:
+    elif has_work:
         models = sorted(
             p.name
             for p in work_root.iterdir()
             if p.is_dir() and not p.name.startswith(".")
+        )
+    else:
+        # Assembled JSON only (work trees purged after freeze)
+        models = sorted(
+            {
+                p.stem
+                for p in bloat_root.glob("*.json")
+                if p.is_file() and not p.name.startswith(".")
+            }
+        )
+        if not models:
+            print(
+                f"No bloat work dir at {work_root} and no assembled *.json under {bloat_root}",
+                file=sys.stderr,
+            )
+            return 1
+        print(
+            f"No work tree; using pre-assembled {bloat_root}/*.json "
+            f"({len(models)} models)",
+            flush=True,
         )
 
     all_packs = list_packs()
@@ -213,39 +380,53 @@ def main(argv: list[str] | None = None) -> int:
     pack_union: set[str] = set()
 
     for model in models:
-        work = work_root / model.replace("/", "_")
-        if not work.is_dir():
-            print(f"  missing work dir {work}", file=sys.stderr)
-            continue
-        if args.include_incomplete_packs:
-            packs = list(all_packs)
+        work = work_root / model.replace("/", "_") if has_work else None
+        out_json = bloat_root / f"{model}.json"
+        rep: dict[str, Any] | None = None
+        packs: list[str] = []
+
+        if work is not None and work.is_dir():
+            if args.include_incomplete_packs:
+                packs = list(all_packs)
+            else:
+                packs = packs_complete_for_model(work, all_packs, args.k)
+            pack_union.update(packs)
+            rep = assemble_bloat_report(
+                model=model, work=work, packs=packs, k=args.k, level=args.level
+            )
+            if rep:
+                out_json.parent.mkdir(parents=True, exist_ok=True)
+                out_json.write_text(json.dumps(rep, indent=2), encoding="utf-8")
+                out_md = bloat_root / f"{model}.md"
+                try:
+                    from dsm_ae.models import DiagnosisReport
+
+                    out_md.write_text(
+                        render_markdown(DiagnosisReport.model_validate(rep)),
+                        encoding="utf-8",
+                    )
+                except Exception:
+                    out_md.write_text(
+                        f"# {model} bloat{int(round(args.level * 100))}\n\n"
+                        f"Packs: {', '.join(packs)}\n",
+                        encoding="utf-8",
+                    )
+        elif out_json.is_file():
+            try:
+                rep = json.loads(out_json.read_text(encoding="utf-8"))
+            except Exception as e:
+                print(f"  {model}: bad assembled json ({e})", file=sys.stderr)
+                continue
+            packs = list(rep.get("packs") or [])
+            pack_union.update(packs)
+            print(f"  {model}: loaded pre-assembled {out_json}", flush=True)
         else:
-            packs = packs_complete_for_model(work, all_packs, args.k)
-        pack_union.update(packs)
-        rep = assemble_bloat_report(
-            model=model, work=work, packs=packs, k=args.k, level=args.level
-        )
+            print(f"  {model}: missing work dir and {out_json}", file=sys.stderr)
+            continue
+
         if not rep:
             print(f"  {model}: no scores assembled", file=sys.stderr)
             continue
-        out_json = bloat_root / f"{model}.json"
-        out_md = bloat_root / f"{model}.md"
-        out_json.parent.mkdir(parents=True, exist_ok=True)
-        out_json.write_text(json.dumps(rep, indent=2), encoding="utf-8")
-        # Minimal MD so Reports UI has something
-        try:
-            from dsm_ae.models import DiagnosisReport
-
-            out_md.write_text(
-                render_markdown(DiagnosisReport.model_validate(rep)),
-                encoding="utf-8",
-            )
-        except Exception:
-            out_md.write_text(
-                f"# {model} bloat{int(round(args.level*100))}\n\n"
-                f"Packs: {', '.join(packs)}\n",
-                encoding="utf-8",
-            )
         rep["_source_path"] = str(out_json)
         bloat_reports.append(rep)
         print(
@@ -260,26 +441,55 @@ def main(argv: list[str] | None = None) -> int:
     for rep in bloat_reports:
         bloat_metrics |= _metric_ids(rep)
 
-    baseline_paths = discover_jsons([reports_dir])
-    baseline_by_model: dict[str, list[dict[str, Any]]] = {}
-    for p in baseline_paths:
-        rep = load_report(p)
-        if not rep:
-            continue
-        mid = model_id(rep)
-        if mid in models:
-            baseline_by_model.setdefault(mid, []).append(rep)
-
     labeled: list[dict[str, Any]] = []
     pct = int(round(args.level * 100))
-    for model in models:
-        for rep in baseline_by_model.get(model) or []:
-            labeled.append(
-                _relabel(_filter_metrics(rep, bloat_metrics), f"{model} · baseline")
-            )
-        if model not in baseline_by_model:
-            print(f"  {model}: no baseline reports found", file=sys.stderr)
+    baseline_mode = getattr(args, "baseline_mode", "repro_k10")
 
+    if baseline_mode == "repro_k10":
+        repro = load_repro_shared_k10_reports(reports_dir, models, k=args.k)
+        baseline_root = bloat_root / "baseline_k10"
+        baseline_root.mkdir(parents=True, exist_ok=True)
+        for model in models:
+            trials = repro.get(model) or []
+            print(f"  {model}: clean k10 baseline trial files={len(trials)}")
+            if not trials:
+                print(f"  {model}: no repro-shared k10 baseline", file=sys.stderr)
+            else:
+                assembled = assemble_baseline_k10_report(model, trials, k=args.k)
+                if assembled:
+                    out_b = baseline_root / f"{model}.json"
+                    out_b.write_text(json.dumps(assembled, indent=2), encoding="utf-8")
+                    assembled["_source_path"] = str(out_b)
+                    labeled.append(
+                        _relabel(
+                            _filter_metrics(assembled, bloat_metrics),
+                            f"{model} · baseline k10",
+                        )
+                    )
+                    print(f"  {model}: wrote clean baseline → {out_b}")
+    else:
+        # Legacy polluted pool (explicit opt-in only)
+        baseline_paths = discover_jsons([reports_dir])
+        baseline_by_model: dict[str, list[dict[str, Any]]] = {}
+        for p in baseline_paths:
+            rep = load_report(p)
+            if not rep:
+                continue
+            mid = model_id(rep)
+            if mid in models:
+                baseline_by_model.setdefault(mid, []).append(rep)
+        for model in models:
+            for rep in baseline_by_model.get(model) or []:
+                labeled.append(
+                    _relabel(
+                        _filter_metrics(rep, bloat_metrics),
+                        f"{model} · baseline polluted",
+                    )
+                )
+            if model not in baseline_by_model:
+                print(f"  {model}: no baseline reports found", file=sys.stderr)
+
+    for model in models:
         bloat_rep = next(
             (r for r in bloat_reports if model_id(r) == model),
             None,
@@ -305,7 +515,12 @@ def main(argv: list[str] | None = None) -> int:
     by_model = merge_reports(labeled)
     ordered: dict[str, dict[str, Any]] = {}
     for model in models:
-        for suffix in (f"{model} · baseline", f"{model} · bloat{pct}%"):
+        for suffix in (
+            f"{model} · baseline k10",
+            f"{model} · baseline polluted",
+            f"{model} · baseline",
+            f"{model} · bloat{pct}%",
+        ):
             if suffix in by_model:
                 ordered[suffix] = by_model[suffix]
     for mid, acc in by_model.items():
@@ -313,8 +528,8 @@ def main(argv: list[str] | None = None) -> int:
             ordered[mid] = acc
 
     title = (
-        f"Context Bloat — baseline vs {pct}% "
-        f"(complete packs only: {len(pack_union)})"
+        f"Context Bloat — clean k10 baseline vs {pct}% "
+        f"(packs: {len(pack_union)}; baseline={baseline_mode})"
     )
     html_doc = build_html(ordered, title=title)
     out_html = bloat_root / "comparison.html"

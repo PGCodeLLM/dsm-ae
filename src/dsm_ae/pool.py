@@ -8,8 +8,7 @@ from __future__ import annotations
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from dataclasses import dataclass
-from typing import Callable, Generic, Iterable, TypeVar
+from typing import Callable, Iterable, TypeVar
 
 T = TypeVar("T")
 R = TypeVar("R")
@@ -33,12 +32,6 @@ class RateLimiter:
                 time.sleep(delay)
                 now = time.monotonic()
             self._next_ok = now + self.min_interval
-
-
-@dataclass
-class PoolConfig:
-    concurrency: int = 1
-    rpm: float | None = None
 
 
 def map_pool(
