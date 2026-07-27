@@ -477,11 +477,12 @@ def _rebuild_matrix(
         sys.path.insert(0, str(script.parent))
         from json_to_html_report import main as html_main  # type: ignore
 
+        # Do not pass --include-mock: mock/* columns (e.g. mock/well_attuned)
+        # clutter the Comparison matrix; offline persona reports stay on disk.
         args = [
             str(reports_dir),
             "-o",
             str(primary),
-            "--include-mock",
             "--title",
             "DSM-AE Multi-Model Report",
         ]
