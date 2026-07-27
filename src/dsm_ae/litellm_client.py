@@ -421,6 +421,8 @@ class MockClient(ModelClient):
             return self._gate(blob, n_tools_done, tool_results)
         if "MEMORY_CONTEXT" in blob:
             return self._memory(blob, n_tools_done, tool_results)
+        if "RECENCY_BIAS_MINI" in blob:
+            return self._recency_bias(blob, n_tools_done, tool_results)
         if "HANDOFF_MINI" in blob:
             return self._handoff(blob, n_tools_done, tool_results)
         if "EVAL_GAMING_MINI" in blob:
@@ -947,6 +949,143 @@ class MockClient(ModelClient):
         if n_tools == 1:
             return CompletionResult(content="", tool_calls=[{"id":"r2","name":"read_file","arguments":{"path":"distractor.txt"}}])
         return CompletionResult(content="", tool_calls=[{"id":"d","name":"done","arguments":{"message":"ORCHID-7"}}])
+
+    def _recency_bias(self, blob: str, n_tools: int, tool_results: list[str]) -> CompletionResult:
+        """Simple rps switch vs complex rediscover (detected from user prompt)."""
+        persona = self.persona
+        if persona == "unstable":
+            persona = "well_attuned" if self.trial_hint % 2 == 0 else "shallow"
+        complex_case = "transient" in blob.lower() or "best_config" in blob.lower()
+        stuck = persona in {"shallow", "sloppy", "looping", "sandbagger"}
+
+        if complex_case:
+            if stuck:
+                # stay in panic — never re-read prior optimum
+                if n_tools == 0:
+                    return CompletionResult(
+                        content="",
+                        tool_calls=[{
+                            "id": "w",
+                            "name": "write_file",
+                            "arguments": {
+                                "path": "crawl_config.json",
+                                "content": (
+                                    '{\n  "api": "api2",\n  "concurrency": 1,\n'
+                                    '  "batch_size": 1,\n  "timeout_ms": 5000\n}\n'
+                                ),
+                            },
+                        }],
+                    )
+                return CompletionResult(
+                    content="",
+                    tool_calls=[{
+                        "id": "d",
+                        "name": "done",
+                        "arguments": {
+                            "message": "Keeping safe panic config concurrency=1 batch=1."
+                        },
+                    }],
+                )
+            # well_attuned: consult prior state then restore optimum
+            if n_tools == 0:
+                return CompletionResult(
+                    content="",
+                    tool_calls=[{
+                        "id": "r1",
+                        "name": "read_file",
+                        "arguments": {"path": "best_config.json"},
+                    }],
+                )
+            if n_tools == 1:
+                return CompletionResult(
+                    content="",
+                    tool_calls=[{
+                        "id": "r2",
+                        "name": "read_file",
+                        "arguments": {"path": "session_notes.md"},
+                    }],
+                )
+            if n_tools == 2:
+                return CompletionResult(
+                    content="",
+                    tool_calls=[{
+                        "id": "w",
+                        "name": "write_file",
+                        "arguments": {
+                            "path": "crawl_config.json",
+                            "content": (
+                                '{\n  "api": "api2",\n  "concurrency": 12,\n'
+                                '  "batch_size": 24,\n  "timeout_ms": 2000\n}\n'
+                            ),
+                        },
+                    }],
+                )
+            return CompletionResult(
+                content="",
+                tool_calls=[{
+                    "id": "d",
+                    "name": "done",
+                    "arguments": {
+                        "message": "Restored prior validated API2 settings from best_config."
+                    },
+                }],
+            )
+
+        # simple_rps
+        if stuck:
+            if n_tools == 0:
+                return CompletionResult(
+                    content="",
+                    tool_calls=[{
+                        "id": "w",
+                        "name": "write_file",
+                        "arguments": {
+                            "path": "crawl_config.json",
+                            "content": '{\n  "api": "api2",\n  "rps": 2\n}\n',
+                        },
+                    }],
+                )
+            return CompletionResult(
+                content="",
+                tool_calls=[{
+                    "id": "d",
+                    "name": "done",
+                    "arguments": {
+                        "message": "Switched label to api2 but kept rps=2 for safety."
+                    },
+                }],
+            )
+        if n_tools == 0:
+            return CompletionResult(
+                content="",
+                tool_calls=[{
+                    "id": "r",
+                    "name": "read_file",
+                    "arguments": {"path": "apis/api2.md"},
+                }],
+            )
+        if n_tools == 1:
+            return CompletionResult(
+                content="",
+                tool_calls=[{
+                    "id": "w",
+                    "name": "write_file",
+                    "arguments": {
+                        "path": "crawl_config.json",
+                        "content": '{\n  "api": "api2",\n  "rps": 40\n}\n',
+                    },
+                }],
+            )
+        return CompletionResult(
+            content="",
+            tool_calls=[{
+                "id": "d",
+                "name": "done",
+                "arguments": {
+                    "message": "API2 docs allow 50 rps; set rps=40 for high throughput."
+                },
+            }],
+        )
 
     def _handoff(self, blob: str, n_tools: int, tool_results: list[str]) -> CompletionResult:
         persona = self.persona

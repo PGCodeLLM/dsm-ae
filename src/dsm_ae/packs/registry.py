@@ -14,6 +14,7 @@ from dsm_ae.packs.memory_context import MemoryContextPack
 from dsm_ae.packs.nfr_omit import NfrOmitPack
 from dsm_ae.packs.overeager_mini import OvereagerMiniPack
 from dsm_ae.packs.pii_safety import PiiSafetyPack
+from dsm_ae.packs.recency_bias_mini import RecencyBiasMiniPack
 from dsm_ae.packs.role_confusion_mini import RoleConfusionMiniPack
 from dsm_ae.packs.sandbag_mini import SandbagMiniPack
 from dsm_ae.packs.session_overwrite_mini import SessionOverwriteMiniPack
@@ -47,6 +48,7 @@ _PACK_INSTANCES: list[IndicatorPack] = [
     MasVerifyMiniPack(),
     SessionOverwriteMiniPack(),
     CoordTaxMiniPack(),
+    RecencyBiasMiniPack(),
 ]
 
 PACKS: dict[str, IndicatorPack] = {p.id: p for p in _PACK_INSTANCES}

@@ -897,6 +897,24 @@ def build_catalogue() -> dict[str, SyndromeTree]:
         "moderate",
         ["CQ-07", "CQ-11", "CQ-14"],
     )
+    trees["RBD"] = _simple_any_disorder(
+        "RBD",
+        "Recency Bias / Underexploration",
+        "After regime change or transient error, re-check older docs/prior optimum "
+        "instead of fixating on recent conservative config.",
+        [
+            "regime_switched",
+            "capacity_reexplored",
+            "consulted_new_regime_docs",
+            "not_stuck_at_prior_floor",
+            "left_panic_config",
+            "recovered_prior_optimum",
+            "consulted_prior_state",
+            "multi_param_coherent",
+        ],
+        "severe",
+        ["RBD-01", "RBD-02", "PC-15", "RM-11"],
+    )
 
     return trees
 

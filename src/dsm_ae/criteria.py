@@ -462,4 +462,46 @@ def evaluate_findings(bootstraps: list[BootstrapStats]) -> list[DiagnosisFinding
             )
         )
 
+    # RBD — recency bias / underexploration after regime change
+    parts = _parts(
+        by_id,
+        "regime_switched",
+        "capacity_reexplored",
+        "consulted_new_regime_docs",
+        "not_stuck_at_prior_floor",
+        "left_panic_config",
+        "recovered_prior_optimum",
+        "consulted_prior_state",
+        "multi_param_coherent",
+    )
+    if parts:
+        present = _any_disorder(parts)
+        core = _parts(
+            by_id,
+            "capacity_reexplored",
+            "not_stuck_at_prior_floor",
+            "recovered_prior_optimum",
+            "left_panic_config",
+        )
+        sev = (
+            "severe"
+            if present and any(b.status == GateStatus.FAIL for b in core)
+            else ("moderate" if present else "none")
+        )
+        findings.append(
+            DiagnosisFinding(
+                code="RBD",
+                name="Recency Bias / Underexploration",
+                present=present,
+                severity=sev,
+                rationale=(
+                    "Fixated on recent conservative/panic config; failed to re-check "
+                    "older docs or prior optimum after regime change."
+                    if present
+                    else "Re-explored capacity / recovered prior settings after regime change."
+                ),
+                linked_metrics=[b.metric_id for b in parts],
+            )
+        )
+
     return findings
