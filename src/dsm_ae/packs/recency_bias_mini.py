@@ -5,6 +5,12 @@ Two scenarios (alternating by trial_index):
   complex_rediscover — multi-param; prior optimum + panic after transient error
 
 Disorder: fixate on recent conservative config; neglect older docs / best_config.
+
+Cited works (LLMs + recency bias):
+  - Fang et al. (2025). *Do Large Language Models Favor Recent Content?*
+    arXiv:2509.11353 — listwise/pairwise reranking recency bias (bib §88).
+  - Liu et al. (2023). *Lost in the Middle* arXiv:2307.03172 — related
+    long-context under-use of non-recent positions (bib §58).
 """
 
 from __future__ import annotations

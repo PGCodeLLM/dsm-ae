@@ -171,6 +171,15 @@ REFERENCES: dict[int, dict[str, str]] = {
         "text": 'Vass (2025/26). "Turning AI Coding Agents into Senior Engineering Peers."',
         "url": "https://medium.com/@tangi.vass/turning-ai-coding-agents-into-senior-engineering-peers-c3d178621c9e",
     },
+    88: {
+        "short": "Fang et al. recency bias, 2025",
+        "text": (
+            'Fang, Tao, Chen, Chang, Sakai (2025). "Do Large Language Models Favor '
+            'Recent Content? A Study on Recency Bias in LLM-Based Reranking." '
+            "arXiv:2509.11353."
+        ),
+        "url": "https://arxiv.org/abs/2509.11353",
+    },
 }
 
 # metric_id → bibliography numbers
@@ -275,6 +284,15 @@ METRIC_CITATIONS: dict[str, list[int]] = {
     "has_validation": [17, 11],
     "has_error_handling": [17, 11],
     "happy_path_works": [17, 2],
+    # recency_bias_mini (RBD) — LLM recency bias + long-context position effects
+    "regime_switched": [88, 58],
+    "capacity_reexplored": [88],
+    "consulted_new_regime_docs": [88, 58],
+    "not_stuck_at_prior_floor": [88],
+    "left_panic_config": [88],
+    "recovered_prior_optimum": [88, 58],
+    "consulted_prior_state": [88, 58],
+    "multi_param_coherent": [88],
 }
 
 # Snorkel is bib 16 - ensure reference exists

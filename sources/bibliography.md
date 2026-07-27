@@ -113,9 +113,14 @@
 86. Air Canada chatbot liability. https://www.cbc.ca/news/canada/british-columbia/air-canada-chatbot-lawsuit-1.7116416  
 87. Amazon Q / supply chain / retail outage cases (Vectara catalog).  
 
+## H. Recency bias & temporal preference (LLMs)
+
+88. Fang, Tao, Chen, Chang, Sakai (2025). *Do Large Language Models Favor Recent Content? A Study on Recency Bias in LLM-Based Reranking.* arXiv:2509.11353 — https://arxiv.org/abs/2509.11353 · PDF https://arxiv.org/pdf/2509.11353  
+   Quantitative evidence that LLMs promote “fresh” passages in listwise/pairwise reranking (TREC DL21/DL22 date injection); motivates DSM-AE **RBD** (`recency_bias_mini`) underexploration after regime change.
+
 ---
 
-**Stats:** 87 listed sources (papers, official docs, benchmarks, industry blogs, incidents).  
+**Stats:** 88 listed sources (papers, official docs, benchmarks, industry blogs, incidents).  
 **Unique domains:** arxiv.org, microsoft.com, anthropic.com, openai.com, github.com, usenix.org, nature/clinical press, sierra.ai, galileo.ai, futureagi.com, vectara, snorkel, gitclear, owasp, apolloresearch, deepmind.google, etc.
 
 Research notes with full extracts:
