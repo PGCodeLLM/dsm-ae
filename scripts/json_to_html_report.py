@@ -935,14 +935,20 @@ def render_syndrome_section(
         gates = gates_from_report_acc(by_model[m])
         pw = evaluate_tree(tree, gates)
         pathways[m] = pw
+        dm = f' data-model="{_esc(m)}"'
         if pw.not_evaluated:
-            chips.append(f'<span class="chip neval">{_esc(m)}: not evaluated</span>')
+            chips.append(
+                f'<span class="chip neval"{dm}>{_esc(m)}: not evaluated</span>'
+            )
         elif pw.present:
             chips.append(
-                f'<span class="chip present">{_esc(m)}: present ({_esc(pw.severity)})</span>'
+                f'<span class="chip present"{dm}>{_esc(m)}: present '
+                f"({_esc(pw.severity)})</span>"
             )
         else:
-            chips.append(f'<span class="chip absent">{_esc(m)}: not present</span>')
+            chips.append(
+                f'<span class="chip absent"{dm}>{_esc(m)}: not present</span>'
+            )
 
     body = [
         # Always collapsed by default (user expands as needed)
@@ -1137,16 +1143,32 @@ def build_html(
     generated = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
 
     def th_models() -> str:
-        return "".join(f"<th class='model'>{html.escape(m)}</th>" for m in models)
+        return "".join(
+            f"<th class='model' data-model-col='{i}' data-model='{html.escape(m, quote=True)}'>"
+            f"{html.escape(m)}</th>"
+            for i, m in enumerate(models)
+        )
+
+    def td_model(i: int, m: str, inner: str, extra_attrs: str = "", cls: str = "") -> str:
+        c = f" class='{cls}'" if cls else ""
+        return (
+            f"<td{c} data-model-col='{i}' data-model='{html.escape(m, quote=True)}'"
+            f"{extra_attrs}>{inner}</td>"
+        )
 
     # packs matrix
     pack_rows = []
     for pack in packs:
         cells = []
-        for m in models:
+        for i, m in enumerate(models):
             ran = pack in by_model[m]["packs"]
             cells.append(
-                "<td class='pass'>Ran</td>" if ran else "<td class='not-run'>Not run</td>"
+                td_model(
+                    i,
+                    m,
+                    "Ran" if ran else "Not run",
+                    cls="pass" if ran else "not-run",
+                )
             )
         pack_rows.append(
             f"<tr><th class='row'>{html.escape(pack)}</th>{''.join(cells)}</tr>"
@@ -1177,7 +1199,7 @@ def build_html(
         else:
             row_cls = "row metric"
         cells = []
-        for m in models:
+        for i, m in enumerate(models):
             g = by_model[m]["gates"].get(metric)
             boot = by_model[m]["bootstraps"].get(metric)
             text, cls = fmt_gate_cell(g)
@@ -1187,7 +1209,13 @@ def build_html(
             # Continuous RdYlGn by pass %; keep status class for semantics / chips.
             rate_cls = " rate-scale" if g is not None else ""
             cells.append(
-                f"<td class='{cls}{rate_cls}'{attrs}{style}>{html.escape(text)}</td>"
+                td_model(
+                    i,
+                    m,
+                    html.escape(text),
+                    extra_attrs=f"{attrs}{style}",
+                    cls=f"{cls}{rate_cls}".strip(),
+                )
             )
         gate_rows.append(
             f"<tr><th class='{row_cls}'>{metric_label}</th>{''.join(cells)}</tr>"
@@ -1207,7 +1235,7 @@ def build_html(
                     name = f"{code} — {f['name']}"
                     break
         cells = []
-        for m in models:
+        for i, m in enumerate(models):
             # prefer live finding; fall back to tree eval
             f = by_model[m]["findings"].get(code)
             if f is None and tree is not None:
@@ -1239,8 +1267,13 @@ def build_html(
                 )
             link = f"#syndrome-{html.escape(code)}"
             cells.append(
-                f"<td class='{cls}'{attrs}>"
-                f"<a class='cell-link' href='{link}'>{html.escape(text)}</a></td>"
+                td_model(
+                    i,
+                    m,
+                    f"<a class='cell-link' href='{link}'>{html.escape(text)}</a>",
+                    extra_attrs=attrs,
+                    cls=cls,
+                )
             )
         finding_rows.append(
             f"<tr><th class='row'><a href='#syndrome-{html.escape(code)}'>"
@@ -1280,10 +1313,22 @@ def build_html(
         packs_s = ", ".join(sorted(acc["packs"])) or "(none)"
         k_s = ", ".join(str(k) for k in acc["k_trials"]) or "?"
         source_blocks.append(
-            f"<li><strong>{html.escape(m)}</strong> — packs: "
+            f"<li data-model='{html.escape(m, quote=True)}'><strong>{html.escape(m)}</strong> — packs: "
             f"<code>{html.escape(packs_s)}</code>; trials: {html.escape(k_s)}; "
             f"sources: {html.escape('; '.join(srcs) if srcs else '—')}</li>"
         )
+
+    # Model column filter controls (checkboxes; client-side hide/show)
+    model_filter_items = []
+    for i, m in enumerate(models):
+        mid = html.escape(m, quote=True)
+        model_filter_items.append(
+            f'<label class="model-filter-item">'
+            f'<input type="checkbox" class="model-col-toggle" data-model-col="{i}" '
+            f'data-model="{mid}" checked/> '
+            f"<code>{html.escape(m)}</code></label>"
+        )
+    model_filter_html = "\n".join(model_filter_items)
 
     metric_algorithms_html = render_metric_algorithms_appendix()
 
@@ -1538,6 +1583,44 @@ def build_html(
     opacity: 1;
     visibility: visible;
   }}
+  /* Model column filter */
+  .model-filter {{
+    border: 1px solid #ccc; background: #fafafa; margin: 0 0 10px; padding: 8px 10px;
+    border-radius: 4px;
+  }}
+  .model-filter > summary {{
+    cursor: pointer; font-weight: 600; font-size: 13px; list-style: none;
+  }}
+  .model-filter > summary::-webkit-details-marker {{ display: none; }}
+  .model-filter > summary::before {{ content: "▸ "; color: #666; }}
+  .model-filter[open] > summary::before {{ content: "▾ "; }}
+  .model-filter-actions {{
+    display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0 6px; align-items: center;
+  }}
+  .model-filter-actions button {{
+    font: inherit; font-size: 12px; padding: 2px 8px; cursor: pointer;
+    border: 1px solid #bbb; border-radius: 3px; background: #fff;
+  }}
+  .model-filter-actions button:hover {{ background: #f0f0f0; }}
+  .model-filter-actions .hint {{ color: #666; font-size: 12px; margin-left: 4px; }}
+  .model-filter-grid {{
+    display: flex; flex-wrap: wrap; gap: 4px 12px; max-height: 180px; overflow-y: auto;
+    padding: 4px 0 2px;
+  }}
+  .model-filter-item {{
+    display: inline-flex; align-items: center; gap: 4px; font-size: 12px;
+    white-space: nowrap; cursor: pointer; user-select: none;
+  }}
+  .model-filter-item input {{ margin: 0; }}
+  .model-filter-item code {{ font-size: 11px; }}
+  /* Hidden model columns + matching pathway / chip blocks */
+  th.model.col-hidden,
+  td.col-hidden,
+  .chip.col-hidden,
+  .model-path.col-hidden,
+  li[data-model].col-hidden {{
+    display: none !important;
+  }}
 </style>
 </head>
 <body>
@@ -1557,6 +1640,20 @@ def build_html(
     <span><i class="swatch unstable"></i> Unstable</span>
     <span><i class="swatch not-run"></i> Not run</span>
   </div>
+  <details class="model-filter" id="model-filter" open>
+    <summary>Compare models — show / hide columns
+      <span class="hint" id="model-filter-count">({len(models)}/{len(models)} visible)</span>
+    </summary>
+    <div class="model-filter-actions">
+      <button type="button" id="model-filter-all" title="Show every model column">All</button>
+      <button type="button" id="model-filter-none" title="Hide every model column">None</button>
+      <button type="button" id="model-filter-invert" title="Invert current selection">Invert</button>
+      <span class="hint">Uncheck models to hide their columns across syndrome, metric, and pack tables.</span>
+    </div>
+    <div class="model-filter-grid" role="group" aria-label="Visible model columns">
+      {model_filter_html}
+    </div>
+  </details>
   <div class="toc meta">
     <a href="#syndrome-matrix">Syndromes</a>
     <a href="#decision-trees">Decision trees</a>
@@ -1714,6 +1811,99 @@ def build_html(
       }});
       window.addEventListener("scroll", hide, true);
       window.addEventListener("blur", hide);
+    }})();
+
+    // --- Model column filter (show/hide comparison columns) -----------------
+    (function modelColumnFilter() {{
+      const STORAGE_KEY = "dsm-ae-matrix-visible-models";
+      const boxes = Array.from(document.querySelectorAll("input.model-col-toggle"));
+      if (!boxes.length) return;
+      const countEl = document.getElementById("model-filter-count");
+
+      function apply() {{
+        const visible = new Set();
+        boxes.forEach((cb) => {{
+          const col = cb.getAttribute("data-model-col");
+          const model = cb.getAttribute("data-model") || "";
+          const on = !!cb.checked;
+          if (on && model) visible.add(model);
+          document.querySelectorAll(
+            "th.model[data-model-col='" + col + "'], td[data-model-col='" + col + "']"
+          ).forEach((el) => {{
+            el.classList.toggle("col-hidden", !on);
+          }});
+          if (model) {{
+            document.querySelectorAll(
+              '.chip[data-model="' + CSS.escape(model) + '"],' +
+              '.model-path[data-model="' + CSS.escape(model) + '"],' +
+              'li[data-model="' + CSS.escape(model) + '"]'
+            ).forEach((el) => {{
+              el.classList.toggle("col-hidden", !on);
+            }});
+          }}
+        }});
+        const nOn = boxes.filter((b) => b.checked).length;
+        if (countEl) {{
+          countEl.textContent = "(" + nOn + "/" + boxes.length + " visible)";
+        }}
+        try {{
+          localStorage.setItem(STORAGE_KEY, JSON.stringify(Array.from(visible)));
+        }} catch (e) {{}}
+        // Parent Comparison shell resizes iframe to content height
+        try {{
+          if (window.parent && window.parent !== window) {{
+            window.parent.postMessage(
+              {{ type: "dsm-ae-matrix-resize" }},
+              window.location.origin
+            );
+          }}
+        }} catch (e) {{}}
+      }}
+
+      // Restore last selection (by model id string)
+      try {{
+        const raw = localStorage.getItem(STORAGE_KEY);
+        if (raw) {{
+          const saved = JSON.parse(raw);
+          if (Array.isArray(saved) && saved.length) {{
+            const set = new Set(saved);
+            const anyKnown = boxes.some((cb) =>
+              set.has(cb.getAttribute("data-model") || "")
+            );
+            if (anyKnown) {{
+              boxes.forEach((cb) => {{
+                const model = cb.getAttribute("data-model") || "";
+                // New models not in saved set stay visible (checked)
+                if (model && set.has(model)) cb.checked = true;
+                else if (model) cb.checked = false;
+              }});
+              // Ensure brand-new model ids remain on by default
+              boxes.forEach((cb) => {{
+                const model = cb.getAttribute("data-model") || "";
+                if (model && !set.has(model)) cb.checked = true;
+              }});
+            }}
+          }}
+        }}
+      }} catch (e) {{}}
+
+      boxes.forEach((cb) => cb.addEventListener("change", apply));
+      const allBtn = document.getElementById("model-filter-all");
+      const noneBtn = document.getElementById("model-filter-none");
+      const invBtn = document.getElementById("model-filter-invert");
+      if (allBtn) allBtn.addEventListener("click", () => {{
+        boxes.forEach((b) => {{ b.checked = true; }});
+        apply();
+      }});
+      if (noneBtn) noneBtn.addEventListener("click", () => {{
+        boxes.forEach((b) => {{ b.checked = false; }});
+        apply();
+      }});
+      if (invBtn) invBtn.addEventListener("click", () => {{
+        boxes.forEach((b) => {{ b.checked = !b.checked; }});
+        apply();
+      }});
+      apply();
     }})();
 
     // Performance: do NOT load mermaid or render any SVG until a syndrome
