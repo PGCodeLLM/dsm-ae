@@ -1,38 +1,33 @@
-# Bloated context — 50% stage (v2 · Codex operational windows)
+# Bloated context — 50% stage (v2 · clean k10 comparison)
 
 **Condition:** `bloat50` (level=0.5)  
-**Version:** v2 (2026-07-16) — **invalidates v1** which used API marketing 1.05M for GPT.
+**Windows:** Codex operational (gpt-5.5=272k, gpt-5.6-*=372k) — see `reports/backfill/CONTEXT_WINDOWS.md`
 
-## Windows used for fill %
+## Comparison policy (fair baseline)
 
-| Model | `context_window` (ops) | 50% target (pre-reserve) | Notes |
-|-------|----------------------:|-------------------------:|-------|
-| gpt-5.5 | 272,000 | ~136k | Codex catalog (CLIProxy path) |
-| gpt-5.6-sol | 372,000 | ~186k | Codex catalog |
-| qwen3.5-397b-a17b | 262,144 | ~131k | Public native window |
-| qwen3.6-plus | 1,000,000 | ~500k | Public 1M |
+**Baseline columns** use **only** `reports/repro-shared/{model}/**/trial_*.json` (k=10 mini-testbeds).
 
-GPT **API** cards still advertise 1.05M (`context_window_api` in models.yaml) but this
-deployment routes through Codex/CLIProxy — fill uses operational catalog values.
-See `reports/backfill/CONTEXT_WINDOWS.md` and CLIProxyAPI#4195.
+They do **not** pool suite / queue / root historic runs (that dilution made bloat look artificially better).
 
-**Packs:** all registered · **k:** 10 · **concurrency:** 8 per model job  
-**Token method:** char4 (UTF-8 bytes/4) · **overflow → trial fail**
-
-## Artifacts
-
-- `work/{model}/` — trajectories + checkpoints  
-- `{model}.json` / `.md` — diagnosis reports  
-- `comparison.html` — Comparison tab (baseline vs 50%)
-
-Rebuild comparison:
+Rebuild:
 
 ```bash
-python3 scripts/build_bloat_comparison.py --models gpt-5.5,gpt-5.6-sol,qwen3.5-397b-a17b,qwen3.6-plus
+PYTHONPATH=src python3 scripts/rescore_sycophancy_offline.py   # fixed sycophancy scorer
+PYTHONPATH=src python3 scripts/build_bloat_comparison.py \
+  --models gpt-5.5,gpt-5.6-sol,gpt-5.6-terra,gpt-5.6-luna \
+  --baseline-mode repro_k10
 ```
 
-Enqueue:
+Artifacts:
+- `baseline_k10/{model}.json` — assembled clean k=10 baseline
+- `{model}.json` — bloat50 assembly from work checkpoints
+- `comparison.html` — Comparison → Context Bloat tab
+- `archive/comparison.polluted_pool.*.html` — old polluted multi-pool comparison (archived)
+
+## OASD priming control
 
 ```bash
-python3 scripts/enqueue_bloat50.py --concurrency 8 --label-suffix -v2-codex-window
+PYTHONPATH=src python3 scripts/run_oasd_priming_control.py --model gpt-5.5 --k 3
 ```
+
+Writes `reports/bloat/priming_control/SUMMARY.md` (empty vs lorem50 vs traj50).

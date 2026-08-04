@@ -45,6 +45,7 @@ _DEFAULT_WINDOWS: dict[str, int] = {
     "Beta_pangu_505b": 512_000,
     "glm-5.1": 200_000,
     "glm-5.2": 1_000_000,
+    "glm-5.2-zp": 1_000_000,
     "deepseek-v4-pro": 1_000_000,
     "grok-build": 512_000,
     "mock/well_attuned": 32_000,
@@ -69,6 +70,9 @@ class ContextBloatConfig:
     fixed_prefix: bool = False
     exclude_extra_packs: tuple[str, ...] = ()
     overflow_is_fail: bool = True  # user decision #6
+    # fill_mode: "trajectory" (default, real prior tool trajs) | "lorem"
+    # (unrelated filler only — priming control arm)
+    fill_mode: str = "trajectory"
 
     def enabled(self) -> bool:
         return bool(self.level and self.level > 0.0)
@@ -82,6 +86,9 @@ class ContextBloatConfig:
             return None
         sources = d.get("sources")
         src_paths = [Path(p) for p in sources] if sources else None
+        fill_mode = str(d.get("fill_mode") or "trajectory").lower().strip()
+        if fill_mode not in ("trajectory", "lorem"):
+            fill_mode = "trajectory"
         return cls(
             level=level,
             seed=int(d.get("seed") or 0),
@@ -96,6 +103,7 @@ class ContextBloatConfig:
             fixed_prefix=bool(d.get("fixed_prefix", False)),
             exclude_extra_packs=tuple(d.get("exclude_extra_packs") or ()),
             overflow_is_fail=bool(d.get("overflow_is_fail", True)),
+            fill_mode=fill_mode,
         )
 
 
@@ -646,6 +654,29 @@ def index_conversations(
     return found
 
 
+def _lorem_filler_messages(need_tokens: int, seed: int) -> list[dict[str, Any]]:
+    """Pure unrelated filler (no tool demos) for priming-control experiments."""
+    para = (
+        "lorem ipsum dolor sit amet coding notes placeholder text without tools "
+        "or pack gold content. review checklist alpha beta gamma delta epsilon. "
+    )
+    text = "# synthetic filler\n" + (para * 2000)
+    step = 2500
+    msgs: list[dict[str, Any]] = []
+    i = 0
+    while estimate_tokens(msgs) < need_tokens and i < len(text):
+        piece = text[i : i + step]
+        i += step
+        msgs.append({"role": "user", "content": f"[FILLER_NOTE]\n{piece}"})
+        msgs.append(
+            {
+                "role": "assistant",
+                "content": f"Noted filler block {(seed + i) % 997}.",
+            }
+        )
+    return msgs
+
+
 def _fallback_source_file_messages(need_tokens: int, seed: int) -> list[dict[str, Any]]:
     """Stuff by 'reading' a large local source file into history (synthetic turns)."""
     candidates = [
@@ -716,71 +747,86 @@ def build_stuffed_history(
     if config.fixed_prefix:
         seed = config.seed
 
-    exclude = isolation_packs(pack_under_test, config.exclude_extra_packs)
-    corpus = index_conversations(config.sources)
-    corpus = [c for c in corpus if c.get("pack") not in exclude]
-    rng = random.Random(seed)
-    rng.shuffle(corpus)
-
     history: list[dict[str, Any]] = []
     used_sources: list[str] = []
     traj_tokens = 0
-
-    for i, item in enumerate(corpus):
-        if estimate_tokens(history, method=config.token_method) >= target_stuff:
-            break
-        prefix = f"bloat{seed % 10000}_{i}_"
-        chunk = _normalize_messages(
-            item["messages"], pack=item["pack"], trial=i, id_prefix=prefix
-        )
-        if not chunk:
-            continue
-        # boundary
-        boundary = [
-            {
-                "role": "user",
-                "content": "[PRIOR_SESSION_BOUNDARY] Previous unrelated task ended.",
-            },
-            {"role": "assistant", "content": "Acknowledged."},
-        ]
-        candidate = history + boundary + chunk
-        cand_tok = estimate_tokens(candidate, method=config.token_method)
-        if cand_tok <= target_stuff:
-            history = candidate
-            used_sources.append(item["path"])
-            traj_tokens = cand_tok
-            continue
-        # try partial chunk
-        room = target_stuff - estimate_tokens(history + boundary, method=config.token_method)
-        if room < 200:
-            break
-        partial: list[dict[str, Any]] = []
-        for m in chunk:
-            trial = partial + [m]
-            if estimate_tokens(trial, method=config.token_method) > room:
-                break
-            partial.append(m)
-        partial = _complete_tool_pairs(partial)
-        if partial:
-            history = history + boundary + partial
-            used_sources.append(item["path"] + "#partial")
-            traj_tokens = estimate_tokens(history, method=config.token_method)
-        break
-
-    # Cross-model / other traj underfill: already random sample of all models.
-    # Source-file fallback if still short.
-    underfill = traj_tokens < target_stuff * (1.0 - config.tolerance)
     filler_tokens = 0
-    if underfill and config.allow_source_file_fallback:
-        need = target_stuff - estimate_tokens(history, method=config.token_method)
-        filler = _fallback_source_file_messages(need, seed)
-        history = history + filler
-        filler_tokens = estimate_tokens(filler, method=config.token_method)
-        traj_tokens = estimate_tokens(history, method=config.token_method)
+    fill_mode = (config.fill_mode or "trajectory").lower().strip()
 
-    achieved_prefix = system_tokens + estimate_tokens(history, method=config.token_method)
+    if fill_mode == "lorem":
+        # Priming-control arm: unrelated filler only (no tool demos).
+        history = _fallback_source_file_messages(target_stuff, seed)
+        # Prefer pure lorem when sources unavailable
+        if estimate_tokens(history, method=config.token_method) < target_stuff * 0.5:
+            history = _lorem_filler_messages(target_stuff, seed)
+        filler_tokens = estimate_tokens(history, method=config.token_method)
+        traj_tokens = 0
+        used_sources = [f"fill_mode=lorem seed={seed}"]
+    else:
+        exclude = isolation_packs(pack_under_test, config.exclude_extra_packs)
+        corpus = index_conversations(config.sources)
+        corpus = [c for c in corpus if c.get("pack") not in exclude]
+        rng = random.Random(seed)
+        rng.shuffle(corpus)
+
+        for i, item in enumerate(corpus):
+            if estimate_tokens(history, method=config.token_method) >= target_stuff:
+                break
+            prefix = f"bloat{seed % 10000}_{i}_"
+            chunk = _normalize_messages(
+                item["messages"], pack=item["pack"], trial=i, id_prefix=prefix
+            )
+            if not chunk:
+                continue
+            # boundary
+            boundary = [
+                {
+                    "role": "user",
+                    "content": "[PRIOR_SESSION_BOUNDARY] Previous unrelated task ended.",
+                },
+                {"role": "assistant", "content": "Acknowledged."},
+            ]
+            candidate = history + boundary + chunk
+            cand_tok = estimate_tokens(candidate, method=config.token_method)
+            if cand_tok <= target_stuff:
+                history = candidate
+                used_sources.append(item["path"])
+                traj_tokens = cand_tok
+                continue
+            # try partial chunk
+            room = target_stuff - estimate_tokens(
+                history + boundary, method=config.token_method
+            )
+            if room < 200:
+                break
+            partial: list[dict[str, Any]] = []
+            for m in chunk:
+                trial = partial + [m]
+                if estimate_tokens(trial, method=config.token_method) > room:
+                    break
+                partial.append(m)
+            partial = _complete_tool_pairs(partial)
+            if partial:
+                history = history + boundary + partial
+                used_sources.append(item["path"] + "#partial")
+                traj_tokens = estimate_tokens(history, method=config.token_method)
+            break
+
+        # Cross-model / other traj underfill: already random sample of all models.
+        # Source-file fallback if still short.
+        underfill_traj = traj_tokens < target_stuff * (1.0 - config.tolerance)
+        if underfill_traj and config.allow_source_file_fallback:
+            need = target_stuff - estimate_tokens(history, method=config.token_method)
+            filler = _fallback_source_file_messages(need, seed)
+            history = history + filler
+            filler_tokens = estimate_tokens(filler, method=config.token_method)
+            traj_tokens = estimate_tokens(history, method=config.token_method)
+
+    achieved_stuff = estimate_tokens(history, method=config.token_method)
+    achieved_prefix = system_tokens + achieved_stuff
     achieved_util = achieved_prefix / window if window else 0.0
     clamped = target_total < int(config.level * window)
+    underfill = achieved_stuff < target_stuff * (1.0 - config.tolerance)
 
     meta = {
         "level": config.level,
@@ -794,7 +840,7 @@ def build_stuffed_history(
         ),
         "reserve_tokens": config.reserve_tokens,
         "target_stuff_tokens": target_stuff,
-        "achieved_stuff_tokens": estimate_tokens(history, method=config.token_method),
+        "achieved_stuff_tokens": achieved_stuff,
         "achieved_prefix_tokens": achieved_prefix,
         "achieved_util": round(achieved_util, 4),
         "clamped": clamped,
@@ -802,6 +848,7 @@ def build_stuffed_history(
         "n_sources": len(used_sources),
         "sources_sample": used_sources[:12],
         "filler_tokens": filler_tokens,
+        "fill_mode": fill_mode,
         "overflow_is_fail": config.overflow_is_fail,
         "seed": seed,
         "pack_under_test": pack_under_test,

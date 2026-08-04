@@ -14,7 +14,11 @@ from dsm_ae.adapters.raw_loop import RawToolLoopAdapter
 from dsm_ae.litellm_client import MockClient
 from dsm_ae.models import MetricResult, ScaffoldCard, TrialTrace
 from dsm_ae.packs.registry import get_pack
-from dsm_ae.trajectory_store import save_trial_artifacts, trajectory_dir
+from dsm_ae.trajectory_store import (
+    litellm_log_path,
+    save_trial_artifacts,
+    trajectory_dir,
+)
 
 
 def _make_mock_adapter(persona: str = "well_attuned") -> RawToolLoopAdapter:
@@ -26,6 +30,30 @@ def _make_mock_adapter(persona: str = "well_attuned") -> RawToolLoopAdapter:
         temperature=0.0,
     )
     return RawToolLoopAdapter(MockClient(persona=persona), card)
+
+
+def _make_live_adapter(
+    model: str,
+    *,
+    models_yaml: Path | str | None = None,
+    max_turns: int = 16,
+) -> RawToolLoopAdapter:
+    """Create live LiteLLM adapter from models.yaml routing."""
+    from dsm_ae.litellm_client import make_client
+
+    yaml_path = Path(models_yaml) if models_yaml else Path("models.yaml")
+    card = ScaffoldCard(
+        model=model,
+        k_trials=1,
+        max_turns=max_turns,
+        temperature=0.0,
+        extra={"models_yaml": str(yaml_path) if yaml_path.is_file() else None},
+    )
+    client = make_client(
+        model,
+        models_yaml=yaml_path if yaml_path.is_file() else None,
+    )
+    return RawToolLoopAdapter(client, card)
 
 
 def _get_persona(work_root: Path, pack_id: str, trial_index: int) -> str:
@@ -81,19 +109,30 @@ def _metrics_dict_from_results(results: list[MetricResult]) -> dict[str, Any]:
 
 
 def score_workspace(
-    pack_id: str, work_root: Path, trial_index: int = 0
+    pack_id: str,
+    work_root: Path,
+    trial_index: int = 0,
+    *,
+    model: str | None = None,
+    models_yaml: Path | str | None = None,
+    force_rerun: bool = False,
 ) -> dict[str, Any]:
     """Score workspace for pack/trial.
 
     Prefer: load from trajectories/{pack}__t{i}/scores.json (real MetricResult rows)
-    Else: run a mock trial (using persona from prepare or default) and persist.
+    unless ``force_rerun``.
+
+    Else: run a trial:
+      - if ``model`` is set and not ``mock/*`` → live LiteLLM via models.yaml
+      - else mock trial (persona from prepare or default)
+
     Returns dict[metric_id, {value, passed, explanation, ...}]
     """
     root = Path(work_root)
     tdir = trajectory_dir(root, pack_id, trial_index)
     scores_path = tdir / "scores.json"
 
-    if scores_path.is_file():
+    if scores_path.is_file() and not force_rerun:
         try:
             rows = json.loads(scores_path.read_text(encoding="utf-8"))
             if isinstance(rows, list) and rows:
@@ -113,29 +152,54 @@ def score_workspace(
             # fall through to re-score
             pass
 
-    # No (usable) scores.json → run mock trial offline
-    persona = _get_persona(root, pack_id, trial_index)
     pack = get_pack(pack_id)
-    adapter = _make_mock_adapter(persona)
+    live = bool(model) and not str(model).startswith("mock/")
+    if live:
+        yaml_path = models_yaml or root.joinpath("models.yaml")
+        # also try cwd / repo models.yaml
+        if not Path(str(yaml_path)).is_file():
+            for cand in (Path("models.yaml"), Path.cwd() / "models.yaml"):
+                if cand.is_file():
+                    yaml_path = cand
+                    break
+        adapter = _make_live_adapter(str(model), models_yaml=yaml_path)
+    else:
+        persona = _get_persona(root, pack_id, trial_index)
+        adapter = _make_mock_adapter(persona)
 
     # run_trial takes the *per-pack* work dir (diagnose uses root/pack_id)
-    # This creates the internal ws like hello_t0 under it; artifacts go to top root.
     pack_work = root / pack_id
     items: list[tuple[str, TrialTrace, list[MetricResult]]] = []
+    call_log = litellm_log_path(root, pack_id, trial_index)
+    call_log.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        if call_log.is_file():
+            call_log.unlink()
+    except OSError:
+        pass
+    client = getattr(adapter, "client", None)
+    if client is not None and hasattr(client, "set_call_log"):
+        client.set_call_log(call_log)
     try:
         traces = pack.run_trial(adapter, pack_work, trial_index)
         for tr in traces:
             scores = pack.score(tr)
             items.append((pack_id, tr, scores))
     except Exception as e:
-        # Return minimal failure metric so write_reward and tests don't explode
+        kind = "live" if live else "mock"
         fail = MetricResult(
             metric_id="protocol_success",
             value=0.0,
             passed=False,
-            explanation=f"mock run failed in score_workspace: {e}",
+            explanation=f"{kind} run failed in score_workspace: {e}",
         )
         return {fail.metric_id: fail.model_dump(mode="json")}
+    finally:
+        if client is not None and hasattr(client, "set_call_log"):
+            try:
+                client.set_call_log(None)
+            except Exception:
+                pass
 
     if items:
         try:
