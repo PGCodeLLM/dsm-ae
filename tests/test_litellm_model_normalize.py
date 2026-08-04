@@ -57,3 +57,28 @@ model_list:
     assert c.api_base == "http://form-wins/v1"
     assert c.api_key == "form-key"
     assert c.model == "hosted_vllm/qwen3.6-plus"
+
+
+def test_assistant_message_preserves_reasoning_content():
+    from dsm_ae.litellm_client import (
+        CompletionResult,
+        assistant_message_from_result,
+        _extract_reasoning_content,
+    )
+
+    assert _extract_reasoning_content({"reasoning_content": "chain"}) == "chain"
+
+    class M:
+        content = "hi"
+        reasoning_content = "think"
+
+    assert _extract_reasoning_content(M()) == "think"
+
+    r = CompletionResult(
+        content="x",
+        tool_calls=[{"id": "t1", "name": "done", "arguments": {"message": "ok"}}],
+        reasoning_content="because",
+    )
+    msg = assistant_message_from_result(r)
+    assert msg["reasoning_content"] == "because"
+    assert msg["tool_calls"][0]["function"]["name"] == "done"

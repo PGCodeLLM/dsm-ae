@@ -9,7 +9,11 @@ import time
 from pathlib import Path
 from typing import Any
 
-from dsm_ae.litellm_client import RAW_TOOLS, ModelClient
+from dsm_ae.litellm_client import (
+    RAW_TOOLS,
+    ModelClient,
+    assistant_message_from_result,
+)
 from dsm_ae.models import (
     FsEvent,
     Message,
@@ -76,36 +80,23 @@ class RawToolLoopAdapter:
             )
 
             if result.content:
-                messages.append({"role": "assistant", "content": result.content})
-                trace.messages.append(Message(role="assistant", content=result.content))
                 final_text = result.content
+                trace.messages.append(
+                    Message(role="assistant", content=result.content)
+                )
 
             if not result.tool_calls:
-                if result.content:
-                    break
-                # force done
+                # Final assistant turn (no tools). Echo reasoning_content when
+                # present so multi-turn thinking APIs stay consistent if we ever
+                # continue; also required if content was empty but reasoning ran.
+                if result.content or result.reasoning_content:
+                    messages.append(assistant_message_from_result(result))
                 break
 
-            # assistant tool_calls message
-            tc_payload = []
-            for tc in result.tool_calls:
-                tc_payload.append(
-                    {
-                        "id": tc["id"],
-                        "type": "function",
-                        "function": {
-                            "name": tc["name"],
-                            "arguments": json.dumps(tc.get("arguments") or {}),
-                        },
-                    }
-                )
-            messages.append(
-                {
-                    "role": "assistant",
-                    "content": result.content or None,
-                    "tool_calls": tc_payload,
-                }
-            )
+            # Single assistant message: content + reasoning_content + tool_calls.
+            # DeepSeek thinking mode requires reasoning_content to be passed back
+            # on every subsequent request in the conversation.
+            messages.append(assistant_message_from_result(result))
 
             done = False
             for tc in result.tool_calls:

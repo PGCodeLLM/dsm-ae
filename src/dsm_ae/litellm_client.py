@@ -18,6 +18,9 @@ class CompletionResult:
     tool_calls: list[dict[str, Any]] = field(default_factory=list)
     usage: dict[str, float] = field(default_factory=dict)
     raw: Any = None
+    # Thinking / reasoning models (DeepSeek, etc.) require this field to be
+    # echoed back on subsequent turns when present in the assistant message.
+    reasoning_content: str | None = None
 
 
 _call_log_tls = threading.local()
@@ -288,6 +291,9 @@ class LiteLLMClient(ModelClient):
         elapsed_ms = (time.perf_counter() - t0) * 1000
         msg = resp.choices[0].message
         content = msg.content or ""
+        # DeepSeek thinking / similar OpenAI-compat proxies attach reasoning
+        # outside content. Must be preserved for multi-turn + tool loops.
+        reasoning_content = _extract_reasoning_content(msg)
         tcs: list[dict[str, Any]] = []
         if getattr(msg, "tool_calls", None):
             for tc in msg.tool_calls:
@@ -317,7 +323,80 @@ class LiteLLMClient(ModelClient):
             response=resp,
             elapsed_ms=elapsed_ms,
         )
-        return CompletionResult(content=content, tool_calls=tcs, usage=usage, raw=resp)
+        return CompletionResult(
+            content=content,
+            tool_calls=tcs,
+            usage=usage,
+            raw=resp,
+            reasoning_content=reasoning_content,
+        )
+
+
+def _extract_reasoning_content(msg: Any) -> str | None:
+    """Pull reasoning/thinking text from a provider message object or dict."""
+    if msg is None:
+        return None
+    for key in (
+        "reasoning_content",
+        "reasoning",
+        "thinking",
+        "thinking_content",
+    ):
+        val = None
+        if isinstance(msg, dict):
+            val = msg.get(key)
+        else:
+            val = getattr(msg, key, None)
+            if val is None:
+                # Some SDKs nest under model_extra / provider_specific_fields
+                extra = getattr(msg, "model_extra", None) or {}
+                if isinstance(extra, dict):
+                    val = extra.get(key)
+                psf = getattr(msg, "provider_specific_fields", None) or {}
+                if val is None and isinstance(psf, dict):
+                    val = psf.get(key)
+        if isinstance(val, str) and val.strip():
+            return val
+        if val is not None and not isinstance(val, str):
+            try:
+                s = str(val)
+                if s.strip():
+                    return s
+            except Exception:
+                pass
+    return None
+
+
+def assistant_message_from_result(result: CompletionResult) -> dict[str, Any]:
+    """Build an OpenAI-style assistant message, preserving reasoning_content.
+
+    Thinking-mode APIs (e.g. DeepSeek) require ``reasoning_content`` from prior
+    assistant turns to be sent back unchanged; dropping it yields BadRequestError.
+    """
+    msg: dict[str, Any] = {
+        "role": "assistant",
+        "content": result.content if result.content else None,
+    }
+    if result.reasoning_content:
+        msg["reasoning_content"] = result.reasoning_content
+    if result.tool_calls:
+        tc_payload = []
+        for tc in result.tool_calls:
+            tc_payload.append(
+                {
+                    "id": tc["id"],
+                    "type": "function",
+                    "function": {
+                        "name": tc["name"],
+                        "arguments": json.dumps(tc.get("arguments") or {}),
+                    },
+                }
+            )
+        msg["tool_calls"] = tc_payload
+        # Some providers reject assistant tool messages with missing content key
+        if "content" not in msg:
+            msg["content"] = None
+    return msg
 
 
 class MockClient(ModelClient):
