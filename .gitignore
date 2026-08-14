@@ -29,3 +29,14 @@ reports/bloat/**/work/
 reports/harbor_runs/
 reports/**/trajectories/
 reports/**/.dsm_ae_ckpt/
+
+# Generated diagnosis reports, matrices, logs, summaries (local / operator only)
+reports/**
+!reports/experimental-ui/
+!reports/experimental-ui/**
+docs/superpowers/reports/
+**/SUMMARY.md
+**/SUMMARY_*.md
+**/*_SUMMARY.md
+reports/**/*.log
+*.nohup.out
