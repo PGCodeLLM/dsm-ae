@@ -457,8 +457,10 @@ def collect_universe_fixed(by_model: dict[str, dict[str, Any]]):
     metrics: set[str] = set()
     findings: set[str] = set()
     packs: set[str] = set()
+    # Harbor reward rollup — not a pack syndrome metric
+    _skip_metrics = frozenset({"primary_pass"})
     for acc in by_model.values():
-        metrics.update(acc["gates"].keys())
+        metrics.update(m for m in acc["gates"].keys() if m not in _skip_metrics)
         findings.update(acc["findings"].keys())
         packs.update(acc["packs"])
     # include catalogue syndrome codes even if no findings yet

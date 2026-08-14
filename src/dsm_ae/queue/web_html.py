@@ -1153,6 +1153,21 @@ def render_comparison_page(href: Href, reports_dir: Path | str, title: str = "Co
             "<code>python scripts/build_bloat_comparison.py</code> after bloat50 jobs"
         )
 
+    exp_html = reports_dir / "experimental-ui" / "index.html"
+    if exp_html.is_file():
+        exp_path = "/reports/experimental-ui/index.html"
+        exp_note = (
+            "Experimental gel-style fingerprints — semantic metric groups, "
+            "similarity-ordered models (branch experimental-ui). "
+            "Rebuild: <code>python scripts/build_experimental_ui.py</code>"
+        )
+    else:
+        exp_path = ""
+        exp_note = (
+            "Experimental UI not built — run "
+            "<code>PYTHONPATH=src python scripts/build_experimental_ui.py</code>"
+        )
+
     def _iframe_panel(
         panel_id: str,
         active: bool,
@@ -1202,6 +1217,15 @@ def render_comparison_page(href: Href, reports_dir: Path | str, title: str = "Co
         "Context Bloat baseline vs 50%",
         "Open full page",
     )
+    exp_panel = _iframe_panel(
+        "tab-experimental",
+        False,
+        exp_note,
+        exp_path,
+        "matrix-frame-experimental",
+        "Experimental electrophoresis-style UI gallery",
+        "Open full page",
+    )
 
     body_main = f"""
   <div class="subtabs" role="tablist" aria-label="Comparison views">
@@ -1209,9 +1233,12 @@ def render_comparison_page(href: Href, reports_dir: Path | str, title: str = "Co
             aria-selected="true">Multi-model</button>
     <button type="button" role="tab" data-tab="tab-bloat"
             aria-selected="false">Context Bloat</button>
+    <button type="button" role="tab" data-tab="tab-experimental"
+            aria-selected="false">Experimental</button>
   </div>
   {baseline_panel}
   {bloat_panel}
+  {exp_panel}
   <script>
   (function () {{
     function contentHeight(doc) {{
@@ -1283,7 +1310,10 @@ def render_comparison_page(href: Href, reports_dir: Path | str, title: str = "Co
       }}
       try {{
         const u = new URL(window.location.href);
-        u.searchParams.set("tab", id === "tab-bloat" ? "bloat" : "baseline");
+        const tab =
+          id === "tab-bloat" ? "bloat" :
+          id === "tab-experimental" ? "experimental" : "baseline";
+        u.searchParams.set("tab", tab);
         history.replaceState(null, "", u.pathname + u.search + u.hash);
       }} catch (e) {{}}
     }}
@@ -1295,6 +1325,7 @@ def render_comparison_page(href: Href, reports_dir: Path | str, title: str = "Co
     try {{
       const q = new URLSearchParams(window.location.search).get("tab");
       if (q === "bloat") activate("tab-bloat");
+      else if (q === "experimental" || q === "exp") activate("tab-experimental");
     }} catch (e) {{}}
   }})();
   </script>

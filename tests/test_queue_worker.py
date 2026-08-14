@@ -239,6 +239,8 @@ def test_retry_resumes_from_checkpoints(tmp_path: Path):
 
 def test_successful_job_rebuilds_matrix_html(tmp_path: Path):
     """On success, worker rebuilds dsm-ae-matrix.html and index.html under reports_dir."""
+    import json
+
     db = tmp_path / "q.db"
     reports = tmp_path / "reports"
     # noise that must not break discovery
@@ -246,6 +248,31 @@ def test_successful_job_rebuilds_matrix_html(tmp_path: Path):
     (reports / "work" / "x" / "trajectories" / "p__t0" / "scores.json").write_text(
         '{"not":"a report"}', encoding="utf-8"
     )
+    # Seed a non-mock diagnosis JSON so matrix rebuild (which excludes mock/*)
+    # still has something to render after the job writes its mock report.
+    seed = {
+        "run_id": "seed",
+        "scaffold_card": {"model": "seed-model", "k_trials": 1, "scaffold": "raw"},
+        "packs": ["hello_metacog"],
+        "k_trials": 1,
+        "gates": [
+            {
+                "metric_id": "files_read_complete",
+                "dimension": "files_read_complete",
+                "pass_rate": 1.0,
+                "mean": 1.0,
+                "std": 0.0,
+                "status": "PASS",
+                "disorder": False,
+                "explanation": "seed",
+            }
+        ],
+        "findings": [],
+        "bootstraps": [],
+        "traces": [],
+        "notes": ["seed for matrix rebuild test"],
+    }
+    (reports / "seed-model.json").write_text(json.dumps(seed), encoding="utf-8")
     store = JobStore(db)
     jid = store.enqueue(model="mock/well_attuned", packs=["hello_metacog"], k=1)
     ok = run_one(store, worker_id="t", reports_dir=reports, models_yaml=None)
@@ -259,7 +286,6 @@ def test_successful_job_rebuilds_matrix_html(tmp_path: Path):
     assert "DSM-AE" in matrix.read_text(encoding="utf-8")[:500]
     # progress mentions matrix
     from dsm_ae.queue.progress import progress_path_for
-    import json
 
     prog = json.loads(Path(job.progress_path or progress_path_for(reports, jid)).read_text())
     assert prog.get("status") == "succeeded"

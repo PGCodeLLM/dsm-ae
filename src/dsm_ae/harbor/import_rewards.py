@@ -90,23 +90,16 @@ def _reward_to_metric_results(reward: dict[str, Any], pack_hint: str | None = No
     results: list[MetricResult] = []
 
     for key, val in reward.items():
+        # primary_pass stays in reward.json for Harbor verifiers only — do not
+        # promote it into the diagnosis gate matrix (not a pack metric).
         if key == "primary_pass":
-            # also emit a synthetic primary metric for visibility
-            mid = "primary_pass"
-            v = float(val)
-            results.append(
-                MetricResult(
-                    metric_id=mid,
-                    value=v,
-                    passed=bool(v >= 0.5),
-                    explanation=f"imported primary_pass from harbor reward (pack={pack_hint or 'unknown'})",
-                )
-            )
             continue
         if not isinstance(val, (int, float)):
             continue
         v = float(val)
         mid = reward_key_to_metric_id(str(key))
+        if mid == "primary_pass":
+            continue
         passed = bool(v >= 0.5) if v in (0.0, 1.0) or (0.0 <= v <= 1.0) else (v > 0.0)
         results.append(
             MetricResult(
