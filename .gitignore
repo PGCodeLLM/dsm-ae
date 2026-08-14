@@ -1,3 +1,4 @@
+# Python / build
 __pycache__/
 *.egg-info/
 .eggs/
@@ -7,36 +8,32 @@ build/
 .coverage
 htmlcov/
 *.pyc
-.work/
-/tmp/
 .venv/
 venv/
-work/
+
+# Local secrets & runtime state (never commit)
+.env
 models.yaml
 models.yaml.local
-
-logs/
-*.bak
-.superpowers/
 data/
+logs/
+work/
+.work/
 .worktrees/
-.env
-data/job_secrets/
-reports/queue/progress/
-# Large run workspaces (assembled diagnosis JSON/HTML is enough for the UI)
+.superpowers/
+/tmp/
+*.bak
+
+# Ephemeral eval workspaces under reports (assembled JSON/MD/HTML go to Git LFS)
 reports/work/
-reports/bloat/**/work/
+reports/**/work/
 reports/harbor_runs/
 reports/**/trajectories/
 reports/**/.dsm_ae_ckpt/
-
-# Generated diagnosis reports, matrices, logs, summaries (local / operator only)
-reports/**
-!reports/experimental-ui/
-!reports/experimental-ui/**
-docs/superpowers/reports/
-**/SUMMARY.md
-**/SUMMARY_*.md
-**/*_SUMMARY.md
+reports/queue/progress/
+data/job_secrets/
 reports/**/*.log
 *.nohup.out
+
+# UI audit screenshots (optional local)
+docs/superpowers/reports/
