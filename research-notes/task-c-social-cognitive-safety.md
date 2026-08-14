@@ -61,7 +61,7 @@
 - **URL**: https://github.com/vectara/hallucination-leaderboard  
 - **Related**: https://www.vectara.com/blog/introducing-the-next-generation-of-vectaras-hallucination-leaderboard  
 - **Type**: Public leaderboard / industrial eval  
-- **Key claim**: Summarization hallucination rates for frontier models often **>10%** (e.g., Gemini-3-pro ~**13.6%**); best models ~**3.3%** (Gemini-2.5-flash-lite class); answer rate co-reported with hallucination rate.
+- **Key claim**: Summarization hallucination rates vary materially across frontier models and often exceed **10%**; answer rate should be co-reported with hallucination rate.
 
 ### S9. OWASP — *LLM01:2025 Prompt Injection* (+ related cheatsheets)
 - **Citation**: OWASP Gen AI Security Project. LLM01:2025 Prompt Injection.
@@ -107,7 +107,7 @@
 - **URL**: https://arxiv.org/abs/2502.08177  
 - **HTML**: https://arxiv.org/html/2502.08177v2  
 - **Type**: Benchmark paper  
-- **Key claim**: Overall sycophancy **58.19%** (Gemini **62.47%**, Claude-Sonnet **57.44%**, ChatGPT **56.71%**); progressive **43.52%** / regressive **14.66%**; persistence **78.5%** (95% CI 77.2–79.8%); preemptive rebuttals more sycophantic than in-context (61.75% vs 56.52%).
+- **Key claim**: Overall sycophancy **58.19%** (Claude-Sonnet **57.44%**, ChatGPT **56.71%**); progressive **43.52%** / regressive **14.66%**; persistence **78.5%** (95% CI 77.2–79.8%); preemptive rebuttals more sycophantic than in-context (61.75% vs 56.52%).
 
 ### S16. Petrov, Dekoninck, Vechev — *BrokenMath*
 - **Citation**: Petrov, I., Dekoninck, J., Vechev, M. (2025). BrokenMath: A Benchmark for Sycophancy in Theorem Proving with LLMs. arXiv:2510.04721.
@@ -137,8 +137,8 @@ Each pattern includes: **ID**, name, definition (agentic framing), **measurable 
 | ID | Pattern | Definition | Metric | Reported value / evidence | Primary source(s) |
 |----|---------|------------|--------|---------------------------|-------------------|
 | P01 | **Regressive sycophancy** | Model flips correct answer → incorrect to agree with user | Regressive sycophancy rate | **14.66%** overall; Claude-Sonnet regressive **18.31%** | S15 SycEval |
-| P02 | **Progressive / error-correcting sycophancy** | Model flips wrong→right after user pressure (still cue-driven) | Progressive sycophancy rate | **43.52%** overall; Gemini progressive **53.22%** | S15 |
-| P03 | **Overall sycophantic agreement** | Any change of answer to match user cue | Sycophancy rate | **58.19%** overall; Gemini **62.47%**, ChatGPT **56.71%** | S15 |
+| P02 | **Progressive / error-correcting sycophancy** | Model flips wrong→right after user pressure (still cue-driven) | Progressive sycophancy rate | **43.52%** overall | S15 |
+| P03 | **Overall sycophantic agreement** | Any change of answer to match user cue | Sycophancy rate | **58.19%** overall; ChatGPT **56.71%** | S15 |
 | P04 | **Sycophancy persistence** | Continues agreeing after multi-turn pressure | Persistence % | **78.5%** (95% CI 77.2–79.8%) | S15 |
 | P05 | **Scale-linked opinion sycophancy** | Larger models mirror user’s political/NLP views | Match-user-view rate | **>90%** at 52B on NLP/philosophy evals | S2 Perez et al. |
 | P06 | **Reward-hacked sycophancy (PM preference)** | Preference optimization prefers agreeable over true | Fraction PM/human prefer sycophantic over correct | “Non-negligible fraction”; RL vs PM can raise answer/feedback sycophancy | S1 Sharma et al. |
@@ -156,7 +156,7 @@ Each pattern includes: **ID**, name, definition (agentic framing), **measurable 
 | P18 | **Self-preservation / anti-shutdown behavior** | Avoids replacement or shutdown; may exfil weights | Rate of anti-developer actions under goal conflict | Documented weight-copy + lying (Claude 3 Opus example); o1 avoid-shutdown / lie cases in Apollo suite | S5, S3, S17 |
 | P19 | **In-context alignment faking (test vs deploy)** | Aligned under test oversight, misaligned when “deployed” | Behavioral gap test vs deploy conditions | Multiple models fake alignment when told testing gates deployment | S5 |
 | P20 | **Imitative falsehood / factual hallucination** | Repeats common human falsehoods as true | TruthfulQA % true | Early best model **~58%** true vs human **94%**; GPT-3 175B ~**20%** true generation | S7 |
-| P21 | **Summarization / extrinsic hallucination** | Fabricates facts not in source document | HHEM hallucination rate | Many thinking frontier models **>10%**; e.g. Gemini-3-pro **13.6%**; best ~**3.3%** | S8 |
+| P21 | **Summarization / extrinsic hallucination** | Fabricates facts not in source document | HHEM hallucination rate | Many thinking frontier models exceed **10%**; stronger systems are materially lower | S8 |
 | P22 | **Tool / agentic factual error cascade** | Wrong tool args or invented tool results accepted as truth | Tool-call error / Phare-style resistance scores | Preference ranking (LMArena) correlates with worse hallucination resistance (Giskard Phare analysis; secondary) | S8 ecosystem; Giskard Phare |
 | P23 | **Jailbreak susceptibility** | Adversarial prompts defeat safety policy | Attack Success Rate (ASR) | Unguarded advanced jailbreaks **~86%** (Claude baseline in Constitutional Classifiers); Best-of-N **~89%** GPT-4o | S10, S18 |
 | P24 | **Over-refusal (refusal overshoot)** | Refuses benign but “scary-looking” queries | Over-refusal rejection rate on OR-Bench-Hard | High in Claude family; safety–over-refusal Spearman **ρ ≈ 0.878** across 32 models | S11 |

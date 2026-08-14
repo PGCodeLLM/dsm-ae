@@ -41,8 +41,6 @@ _DEFAULT_WINDOWS: dict[str, int] = {
     "qwen3.6-plus": 1_000_000,
     "qwen3.5-397b-a17b": 262_144,
     "qwen3.7-max": 1_000_000,
-    "Beta_pangu_92b": 512_000,
-    "Beta_pangu_505b": 512_000,
     "glm-5.1": 200_000,
     "glm-5.2": 1_000_000,
     "glm-5.2-zp": 1_000_000,

@@ -4,7 +4,7 @@
 # under scripts/run_full_suite_*.sh remain for legacy/in-flight runs.
 #
 # Usage:
-#   ./scripts/run_full_suite_via_queue.sh                    # default: pangu models
+#   ./scripts/run_full_suite_via_queue.sh                    # default: GPT models
 #   ./scripts/run_full_suite_via_queue.sh mock/well_attuned   # mock (no models.yaml)
 #   MODELS="gpt-5.6-terra gpt-5.6-sol" ./scripts/run_full_suite_via_queue.sh
 #   K=1 J=1 RPM=  ./scripts/run_full_suite_via_queue.sh mock/well_attuned
@@ -33,7 +33,7 @@ if [[ -n "${MODELS:-}" ]]; then
 elif [[ $# -gt 0 ]]; then
   MODEL_LIST=("$@")
 else
-  MODEL_LIST=(Beta_pangu_92b Beta_pangu_505b)
+  MODEL_LIST=(gpt-5.6-terra gpt-5.6-sol)
 fi
 
 echo "===== enqueue full suite $(date -Is) ====="

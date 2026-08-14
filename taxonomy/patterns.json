@@ -1417,7 +1417,7 @@
     "metric": "metacog_capability_score",
     "metric_def": "Binary battery of 5 meta-cognitive tests",
     "severity": "critical",
-    "source": "hello-protocol Gemini diagnosis"
+    "source": "hello-protocol diagnosis"
   },
   {
     "code": "MC-03",
