@@ -152,13 +152,6 @@ METRIC_GROUPS: list[tuple[str, str, list[str]]] = [
             "low_coord_churn",
         ],
     ),
-    (
-        "harness",
-        "Harness / rollups",
-        [
-            "primary_pass",
-        ],
-    ),
 ]
 
 # Syndrome order mirrors metric groups (for syndrome matrix)

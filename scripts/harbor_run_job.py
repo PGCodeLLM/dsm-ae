@@ -98,11 +98,6 @@ def _trial_task_fn(
     return task_fn
 
 
-# Back-compat alias
-def _mock_task_fn(pack_id: str, trial_index: int, model: str):
-    return _trial_task_fn(pack_id, trial_index, model)
-
-
 def run_harbor_job(
     *,
     job_id: str,
