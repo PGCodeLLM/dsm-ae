@@ -72,6 +72,8 @@ These are **candidates** for smoke/floor demotion or tier2 redesign — not proo
 ## Models included
 
 - `aggregate`
+- `Beta_pangu_505b`
+- `Beta_pangu_92b`
 - `claude-fable-5`
 - `claude-opus-4-8`
 - `claude-sonnet-5`

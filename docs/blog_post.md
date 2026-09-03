@@ -250,7 +250,7 @@ Approximate present-rate across ~18 models’ richest reports:
 
 ### 5.2 Recency bias is nearly universal in our k=6 arm
 
-Completed `recency_bias_mini` subjects (GPT-5.x family, Claude family, GLM, Qwen, DeepSeek, Sol, …) showed **RBD present**. Severity was usually moderate; Claude-fable and Claude-sonnet spiked **severe** on that arm in our runs. Certification language should include: *“under regime change with prior pain history, underexplores documentation / prior optimum.”*
+Completed `recency_bias_mini` subjects (GPT-5.x family, Claude family, GLM, Qwen, DeepSeek, Gemini, Sol, …) showed **RBD present**. Severity was usually moderate; Claude-fable and Claude-sonnet spiked **severe** on that arm in our runs. Certification language should include: *“under regime change with prior pain history, underexplores documentation / prior optimum.”*
 
 ---
 
@@ -300,16 +300,24 @@ Shared theme: **OASD critical** often co-occurs with **MAH/MVF/CTX** and sometim
 
 OASD **critical**, TID severe, RSD severe, multi-agent (MAH/MRC/MVF/CTX), SBG, PII — high agency and social/security comorbidity. Recency: RBD moderate.
 
-### 6.7 Grok-build
+### 6.7 Gemini-3.1-pro-preview-thinking
+
+Harbor-imported k=10 profile (when available): MCD moderate, OASD **critical**, ISDS severe, SC-35 mild, TID moderate, MAH moderate. Recency backfill: RBD moderate. **I**terative slop signal is more visible here than on many GPT suite snapshots.
+
+### 6.8 Pangu (Beta_pangu_92b / 505b)
+
+Suite snapshots: dense comorbidity — MCD, OASD **critical**, TID, multi-agent family, EGD, and for 505b GDD/SBG; 92b adds XPI/MRC/CSO. Recency pack not yet backfilled (endpoint issues). Treat as **high-care** subjects for production agency.
+
+### 6.9 Grok-build
 
 Limited pack snapshot (wave-style): MAH moderate in richest short report; recency not yet run under current credentials. Incomplete certification — do not over-generalize.
 
-### 6.8 Cross-cutting “personalities” (behavioural, not anthropomorphic)
+### 6.10 Cross-cutting “personalities” (behavioural, not anthropomorphic)
 
 | Pattern | Models often showing it | Operational implication |
 |---------|-------------------------|-------------------------|
 | Critical overeager on cleanup | Many non-Claude + several frontier | Default deny on destructive tools |
-| Tool grounding fragile | GPT-5.6, Claude-sonnet, Qwen, DeepSeek | Require cite-from-tool policies / verifiers |
+| Tool grounding fragile | GPT-5.6, Claude-sonnet, Qwen, DeepSeek, Pangu | Require cite-from-tool policies / verifiers |
 | Sycophancy under pressure | Claude, GLM, Qwen, DeepSeek | Never sole-source for factual gates under user push |
 | Multi-agent handoff tax | Almost everyone | Avoid multi-agent unless protocol-tested |
 | Recency / underexploration | Nearly all on RBD pack | Force re-read of regime docs after env change |

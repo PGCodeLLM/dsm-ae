@@ -79,6 +79,8 @@ JOB_MODEL = {
     "c9a70276": "deepseek-v4-flash-0731",
     "302de187": "gemini-3.1-pro-preview-thinking",
     "f4a2a2a4": "gemini-3.1-pro-preview-thinking",
+    "76cc38f8": "Beta_pangu_505b",
+    "0a2c2e08": "Beta_pangu_92b",
     "e293310a": "qwen3.7-max",
     "b68a0e33": "qwen3.5-397b-a17b",
     "e8f84a2c": "qwen3.6-plus",
@@ -273,33 +275,35 @@ def main() -> int:
     )
     ap.add_argument("--skip-7z", action="store_true")
     args = ap.parse_args()
-    if args.dest.exists():
-        shutil.rmtree(args.dest)
-    args.dest.mkdir(parents=True)
-    info = stage(args.dest)
-    print(json.dumps({"staged": str(args.dest), **{k: info[k] for k in info if k != "stats"}}, indent=2))
+    dest = args.dest.resolve()
+    out = args.out.resolve()
+    if dest.exists():
+        shutil.rmtree(dest)
+    dest.mkdir(parents=True)
+    info = stage(dest)
+    print(json.dumps({"staged": str(dest), **{k: info[k] for k in info if k != "stats"}}, indent=2))
     print(f"models={len(info['stats'])} copied={info['n_copied']}")
     staged_bytes = sum(
-        p.stat().st_size for p in args.dest.rglob("*") if p.is_file()
+        p.stat().st_size for p in dest.rglob("*") if p.is_file()
     )
     print(f"staged_size={human(staged_bytes)}")
     if args.skip_7z:
         return 0
-    args.out.parent.mkdir(parents=True, exist_ok=True)
-    if args.out.exists():
-        args.out.unlink()
+    out.parent.mkdir(parents=True, exist_ok=True)
+    if out.exists():
+        out.unlink()
     cmd = [
         "7z",
         "a",
         "-t7z",
         "-mx=5",
         "-mmt=on",
-        str(args.out),
+        str(out),
         ".",
     ]
-    print("running", " ".join(cmd), "cwd", args.dest)
-    subprocess.check_call(cmd, cwd=args.dest)
-    print(f"wrote {args.out} ({human(args.out.stat().st_size)})")
+    print("running", " ".join(cmd), "cwd", dest)
+    subprocess.check_call(cmd, cwd=dest)
+    print(f"wrote {out} ({human(out.stat().st_size)})")
     return 0
 
 
