@@ -221,10 +221,6 @@ def _family(model: str) -> str:
         return "glm"
     if m.startswith("deepseek"):
         return "deepseek"
-    if m.startswith("gemini"):
-        return "gemini"
-    if "pangu" in m:
-        return "pangu"
     if m.startswith("grok"):
         return "grok"
     return "other"
@@ -236,8 +232,6 @@ _FAMILY_HUE = {
     "qwen": 280,
     "glm": 160,
     "deepseek": 320,
-    "gemini": 45,
-    "pangu": 0,
     "grok": 120,
     "other": 0,
 }
@@ -622,11 +616,9 @@ def build_variant_html(
 
 def _short_model(m: str) -> str:
     # compact lane labels
-    m = m.replace("gemini-3.1-pro-preview-thinking", "gemini-3.1")
     m = m.replace("qwen3.5-397b-a17b", "qwen3.5-397b")
     m = m.replace("deepseek-v4-flash-0731", "ds-flash-0731")
     m = m.replace("deepseek-v4-pro", "ds-pro")
-    m = m.replace("Beta_pangu_", "pangu-")
     return m
 
 

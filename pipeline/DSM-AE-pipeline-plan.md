@@ -182,7 +182,7 @@ class CriteriaRule(Protocol):
 | Hat | Conclusion |
 |-----|------------|
 | **White (facts)** | 158 patterns, ≥70 sources, seed metrics exist (OR, erosion, sycophancy, MAST) |
-| **Red (feel)** | Hello-protocol felt decisive for Gemini; field needs that decisiveness for production wipe-class failures |
+| **Red (feel)** | Early hello-protocol runs felt decisive; field needs that decisiveness for production wipe-class failures |
 | **Black (risks)** | Scaffold confounds, judge bias, eval gaming of DSM-AE itself, legal/medical language risk |
 | **Yellow (value)** | Shared vocabulary for incidents; model+scaffold selection; safety gates |
 | **Green (ideas)** | Syndrome composites (OASD, ISDS, RSD, MCD, EGD); LiteLLM router; mutation-tested scenarios |

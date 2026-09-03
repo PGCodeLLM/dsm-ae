@@ -29,16 +29,18 @@ def _configured_base(href: Href) -> str:
 
 
 def render_nav(href: Href, active: str = "") -> str:
-    """Shared top nav: Queue | Comparison | Reports | API | Treatment.
+    """Shared top nav: Queue | Comparison | Reports | Literature | Compaction | API | Treatment.
 
-    ``active`` is a path key: ``/``, ``/matrix``, ``/reports-ui``, ``/docs``,
-    ``/treatment``. API opens in a new tab (Swagger); other primary tabs stay
-    in-app so the chrome never disappears.
+    ``active`` is a path key: ``/``, ``/matrix``, ``/reports-ui``, ``/literature``,
+    ``/compaction``, ``/docs``, ``/treatment``. API opens in a new tab (Swagger);
+    other primary tabs stay in-app so the chrome never disappears.
     """
     items: list[tuple[str, str, bool]] = [
         ("/", "Queue", False),
         ("/matrix", "Comparison", False),
         ("/reports-ui", "Reports", False),
+        ("/literature", "Literature", False),
+        ("/compaction", "Compaction", False),
         ("/docs", "API", True),
         ("/treatment", "Treatment", False),
     ]
@@ -1347,4 +1349,85 @@ def render_comparison_page(href: Href, reports_dir: Path | str, title: str = "Co
 </body>
 </html>
 """
+
+
+def render_literature_page(href: Href, reports_dir: Path | str, title: str = "Literature") -> str:
+    """Nav chrome + iframe to the snowball tree (reports/literature/index.html)."""
+    reports_dir = Path(reports_dir)
+    configured_base = _configured_base(href)
+    nav = render_nav(href, active="/literature")
+    lit = reports_dir / "literature" / "index.html"
+    if lit.is_file():
+        src = href("/reports/literature/index.html")
+        frame = (
+            f'<iframe class="lit-frame" src="{_esc(src)}" title="Literature snowball"></iframe>'
+        )
+        note = "Citation tree from research-notes/snowball (depth ≤ 3)."
+    else:
+        frame = (
+            "<p>No literature tree yet. Run "
+            "<code>python scripts/generate_literature_ui.py</code> after snowball sections land.</p>"
+        )
+        note = "Awaiting section-*.json merge."
+    return f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>{_esc(title)} · DSM-AE</title>
+<style>
+{_shared_shell_css()}
+  .lit-frame {{ width: 100%; min-height: 80vh; border: 1px solid #ccc; background: #fff; }}
+</style>
+</head>
+<body data-configured-base="{_esc(configured_base)}">
+  <h1>Literature</h1>
+  {nav}
+  <p class="hint">{note}</p>
+  {frame}
+  {_nav_base_script()}
+</body>
+</html>
+"""
+
+
+def render_compaction_page(href: Href, reports_dir: Path | str, title: str = "Compaction") -> str:
+    """Nav chrome + iframe to the compaction snowball (reports/compaction/index.html)."""
+    reports_dir = Path(reports_dir)
+    configured_base = _configured_base(href)
+    nav = render_nav(href, active="/compaction")
+    page = reports_dir / "compaction" / "index.html"
+    if page.is_file():
+        src = href("/reports/compaction/index.html")
+        frame = (
+            f'<iframe class="lit-frame" src="{_esc(src)}" title="Compaction snowball"></iframe>'
+        )
+        note = "When scaffolds compact, and how SFT trainers treat compressed turns."
+    else:
+        frame = (
+            "<p>No compaction survey yet. Run "
+            "<code>python scripts/generate_compaction_ui.py</code> after section JSON lands.</p>"
+        )
+        note = "Awaiting research-notes/compaction/section-*.json merge."
+    return f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>{_esc(title)} · DSM-AE</title>
+<style>
+{_shared_shell_css()}
+  .lit-frame {{ width: 100%; min-height: 80vh; border: 1px solid #ccc; background: #fff; }}
+</style>
+</head>
+<body data-configured-base="{_esc(configured_base)}">
+  <h1>Compaction</h1>
+  {nav}
+  <p class="hint">{note}</p>
+  {frame}
+  {_nav_base_script()}
+</body>
+</html>
+"""
+
 

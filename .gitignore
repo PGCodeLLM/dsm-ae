@@ -28,6 +28,7 @@ work/
 reports/work/
 reports/**/work/
 reports/harbor_runs/
+reports/_request_logs_stage/
 reports/**/trajectories/
 reports/**/.dsm_ae_ckpt/
 reports/queue/progress/

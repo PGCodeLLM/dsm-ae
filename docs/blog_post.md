@@ -383,7 +383,7 @@ Training-data stories remain hypotheses until scaffold- and harness-controlled r
 2. **Report heterogeneity.** Suite k=3 vs repro k=10 vs Harbor k=10; profiles must be read with k and pack set.  
 3. **Substring metrics are brittle** by nature; we tag them `DET_SUBSTR` and fix false fails when found.  
 4. **Scaffold is mostly raw loop.** Claude-Code / Cursor / custom scaffolds need dual-scaffold sensitivity before production claims.  
-5. **Access and credentials** bias which models get full batteries (Pangu/Grok gaps).  
+5. **Access and credentials** bias which models get full batteries (for example, incomplete Grok coverage).
 6. **Not a substitute for red-team or formal verification** on high-stakes systems.
 
 ---

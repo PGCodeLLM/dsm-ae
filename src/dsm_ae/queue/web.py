@@ -38,6 +38,8 @@ from dsm_ae.queue.web_html import (
     render_queue_page,
     render_reports_page,
     render_treatment_page,
+    render_literature_page,
+    render_compaction_page,
 )
 
 
@@ -199,6 +201,8 @@ def create_app(
             or path.startswith("/matrix")
             or path.startswith("/reports")
             or path.startswith("/treatment")
+            or path.startswith("/literature")
+            or path.startswith("/compaction")
             or path.startswith("/api/jobs")
         )
         if no_cache:
@@ -595,6 +599,18 @@ def create_app(
     def treatment_page() -> HTMLResponse:
         return _html(
             render_treatment_page(href, reports_dir, title="Treatment")
+        )
+
+    @app.get("/literature", response_class=HTMLResponse)
+    def literature_page() -> HTMLResponse:
+        return _html(
+            render_literature_page(href, reports_dir, title="Literature")
+        )
+
+    @app.get("/compaction", response_class=HTMLResponse)
+    def compaction_page() -> HTMLResponse:
+        return _html(
+            render_compaction_page(href, reports_dir, title="Compaction")
         )
 
     app.mount(

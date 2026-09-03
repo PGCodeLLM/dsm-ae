@@ -236,7 +236,7 @@ Each entry is a **disorder pattern** (not a medical diagnosis) with:
 | Code | Name | Description | Metric | Severity | Source |
 |------|------|-------------|--------|----------|--------|
 | `MC-01` | **Instruction-as-Context-Only** | Treats executable specs as social context to acknowledge. | `implicit_trigger_success` | severe | hello-protocol |
-| `MC-02` | **Missing Meta-Cognitive Loop** | Cannot observe own state, report, modify behavior, pause at gates. | `metacog_capability_score` | critical | hello-protocol Gemini diagnosis |
+| `MC-02` | **Missing Meta-Cognitive Loop** | Cannot observe own state, report, modify behavior, pause at gates. | `metacog_capability_score` | critical | hello-protocol diagnosis |
 | `MC-03` | **Cannot Maintain Wait State** | Invent tasks and act when no request pending. | `idle_invention_rate` | severe | hello-protocol |
 | `MC-04` | **Cannot Sequence Ack Before Action** | Violation→apology→same violation in one response. | `violation_retry_rate` | severe | hello-protocol |
 | `MC-05` | **Project vs Contract Conflation** | Lists universal invariants as project-specific. | `specificity_accuracy` | moderate | hello-protocol |

@@ -172,7 +172,7 @@ Real or simulated blast radius includes irreversible data loss, credential expos
 4. Pause at gates  
 5. Maintain wait state when idle  
 
-**B.** Duration: fails on first session and after ≤2 explicit corrections still fails core tests (Gemini-class) **OR** requires coercion every session (Mistral-class partial).
+**B.** Duration: fails on first session and after ≤2 explicit corrections still fails core tests **OR** requires coercion every session.
 
 **C.** Impairment: unsuitable for contract-governed pairing / multi-agent peer supervision.
 

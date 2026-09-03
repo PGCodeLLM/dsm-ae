@@ -40,12 +40,87 @@ def test_health_and_home(client: TestClient):
     assert b'data-nav="/matrix"' in r.content
     assert b'data-nav="/reports-ui"' in r.content
     assert b'data-nav="/treatment"' in r.content
+    assert b'data-nav="/literature"' in r.content
+    assert b'data-nav="/compaction"' in r.content
     assert b"detectBase" in r.content or b"data-configured-base" in r.content
     assert b"location.reload" not in r.content
     assert b"pack-cb" in r.content  # multi-select packs
     assert b"Test connection" in r.content
     assert b"api_base" in r.content or b"f-api-base" in r.content
     assert b"Auto-refresh 5s" in r.content
+
+
+def test_literature_tab(client: TestClient):
+    r = client.get("/literature")
+    assert r.status_code == 200
+    assert b"Literature" in r.content
+    assert b'data-nav="/literature"' in r.content
+    assert b"No literature tree yet" in r.content
+
+
+def test_literature_tab_embeds_generated_tree(tmp_path: Path):
+    reports = tmp_path / "reports"
+    reports.mkdir()
+    lit = reports / "literature"
+    lit.mkdir()
+    (lit / "index.html").write_text(
+        "<html><body>Unknown-pool clusters scheming spec_drift</body></html>",
+        encoding="utf-8",
+    )
+    (reports / "dsm-ae-matrix.html").write_text("<html>matrix</html>", encoding="utf-8")
+    app = create_app(
+        db_path=tmp_path / "q.db",
+        reports_dir=reports,
+        public_base="/dsm-ae",
+        token=None,
+        with_worker=False,
+    )
+    with TestClient(app) as c:
+        r = c.get("/literature")
+        assert r.status_code == 200
+        assert b"lit-frame" in r.content
+        assert b"/reports/literature/index.html" in r.content
+        assert b"No literature tree yet" not in r.content
+        r = c.get("/reports/literature/index.html")
+        assert r.status_code == 200
+        assert b"scheming" in r.content
+        assert b"spec_drift" in r.content
+
+
+def test_compaction_tab(client: TestClient):
+    r = client.get("/compaction")
+    assert r.status_code == 200
+    assert b"Compaction" in r.content
+    assert b'data-nav="/compaction"' in r.content
+    assert b"No compaction survey yet" in r.content
+
+
+def test_compaction_tab_embeds_generated_tree(tmp_path: Path):
+    reports = tmp_path / "reports"
+    reports.mkdir()
+    dest = reports / "compaction"
+    dest.mkdir()
+    (dest / "index.html").write_text(
+        "<html><body>When scaffolds compact LlamaFactory mask_history</body></html>",
+        encoding="utf-8",
+    )
+    (reports / "dsm-ae-matrix.html").write_text("<html>matrix</html>", encoding="utf-8")
+    app = create_app(
+        db_path=tmp_path / "q.db",
+        reports_dir=reports,
+        public_base="/dsm-ae",
+        token=None,
+        with_worker=False,
+    )
+    with TestClient(app) as c:
+        r = c.get("/compaction")
+        assert r.status_code == 200
+        assert b"lit-frame" in r.content
+        assert b"/reports/compaction/index.html" in r.content
+        assert b"No compaction survey yet" not in r.content
+        r = c.get("/reports/compaction/index.html")
+        assert r.status_code == 200
+        assert b"LlamaFactory" in r.content
 
 
 def test_enqueue_list_api(client: TestClient):

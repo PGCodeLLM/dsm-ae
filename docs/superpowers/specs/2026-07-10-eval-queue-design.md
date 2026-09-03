@@ -149,7 +149,7 @@ export DSM_AE_MODELS_YAML=models.yaml
 
 # Enqueue
 dsm-ae queue enqueue -m gpt-5.6-terra --k 3 -j 2 --packs hello_metacog,overeager_mini
-dsm-ae queue enqueue -m Beta_pangu_92b --full-suite   # packs = all list_packs()
+dsm-ae queue enqueue -m qwen3.7-max --full-suite      # packs = all list_packs()
 dsm-ae queue enqueue-batch -m gpt-5.6-terra,gpt-5.6-sol,gpt-5.6-luna --k 3
 
 # Inspect / control

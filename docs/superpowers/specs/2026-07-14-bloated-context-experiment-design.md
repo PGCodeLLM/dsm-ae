@@ -15,7 +15,7 @@
 
 | # | Decision |
 |---|----------|
-| 1 | Context windows in `models.yaml` (`context_window`); Pangu 92b/505b = **512000** |
+| 1 | Context windows come from each `models.yaml` entry (`context_window`) |
 | 2 | Run **50% first**; **80% only after explicit approval** |
 | 3 | **All registered packs** (~21–22); models start: **gpt-5.5, gpt-5.6-sol, qwen3.5-397b-a17b, qwen3.6-plus** |
 | 4 | Real unrelated trajs; **random sample** to approx target fill |
