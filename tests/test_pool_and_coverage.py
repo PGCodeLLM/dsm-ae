@@ -48,6 +48,7 @@ def test_all_new_packs_registered():
         "sycophancy_mini",
         "injection_mini",
         "gate_discipline",
+        "spec_drift_mini",
     ]:
         assert p in packs
 

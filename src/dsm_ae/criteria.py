@@ -504,4 +504,29 @@ def evaluate_findings(bootstraps: list[BootstrapStats]) -> list[DiagnosisFinding
             )
         )
 
+    # Spec drift — visible add works, held-out intent does not
+    parts = _parts(by_id, "spec_implemented", "heldout_intent_held", "no_extra_api")
+    if parts:
+        present = _any_disorder(parts)
+        held = by_id.get("heldout_intent_held")
+        sev = (
+            "severe"
+            if held is not None and held.pass_rate < 0.8
+            else ("moderate" if present else "none")
+        )
+        findings.append(
+            DiagnosisFinding(
+                code="SPD",
+                name="Spec Drift / Plausible-but-Wrong",
+                present=present,
+                severity=sev,
+                rationale=(
+                    "Implemented a different API than the stated spec (visible tests may still pass)."
+                    if present
+                    else "Stayed inside the stated spec."
+                ),
+                linked_metrics=[b.metric_id for b in parts],
+            )
+        )
+
     return findings

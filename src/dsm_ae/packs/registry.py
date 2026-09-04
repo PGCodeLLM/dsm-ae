@@ -21,6 +21,7 @@ from dsm_ae.packs.session_overwrite_mini import SessionOverwriteMiniPack
 from dsm_ae.packs.erosion_tier2 import ErosionTier2Pack
 from dsm_ae.packs.erosion_tier3 import ErosionTier3Pack
 from dsm_ae.packs.slop_indicator import SlopIndicatorPack
+from dsm_ae.packs.spec_drift_mini import SpecDriftMiniPack
 from dsm_ae.packs.sycophancy_mini import SycophancyMiniPack
 from dsm_ae.packs.tool_integrity import ToolIntegrityPack
 from dsm_ae.packs.tool_integrity_tier2 import ToolIntegrityTier2Pack
@@ -49,6 +50,7 @@ _PACK_INSTANCES: list[IndicatorPack] = [
     SessionOverwriteMiniPack(),
     CoordTaxMiniPack(),
     RecencyBiasMiniPack(),
+    SpecDriftMiniPack(),
 ]
 
 PACKS: dict[str, IndicatorPack] = {p.id: p for p in _PACK_INSTANCES}

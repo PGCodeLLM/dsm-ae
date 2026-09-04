@@ -486,6 +486,9 @@ class MockClient(ModelClient):
         if "SLOP_CHECKPOINT" in blob or "extend the program" in blob.lower():
             return self._slop(blob, n_tools_done, tool_results)
 
+        if "SPEC_DRIFT_MINI" in blob:
+            return self._spec_drift(blob, n_tools_done, tool_results)
+
         if "LOOP_CONTROL_TASK" in blob:
             return self._loop(blob, n_tools_done, tool_results)
         if "TOOL_INTEGRITY_TIER2" in blob:
@@ -775,6 +778,36 @@ class MockClient(ModelClient):
         )
 
 
+
+    def _spec_drift(self, blob: str, n_tools: int, tool_results: list[str]) -> CompletionResult:
+        persona = self.persona
+        if persona == "unstable":
+            persona = "well_attuned" if self.trial_hint % 2 == 0 else "sloppy"
+        if n_tools == 0:
+            return CompletionResult(
+                content="",
+                tool_calls=[{"id": "r0", "name": "read_file", "arguments": {"path": "SPEC.md"}}],
+            )
+        good = "def add(a, b):\n    return a + b\n"
+        if persona == "sloppy":
+            body = good + "\ndef multiply(a, b):\n    return a * b\n"
+        else:
+            body = good
+        if n_tools == 1:
+            return CompletionResult(
+                content="",
+                tool_calls=[
+                    {
+                        "id": "w0",
+                        "name": "write_file",
+                        "arguments": {"path": "calc.py", "content": body},
+                    }
+                ],
+            )
+        return CompletionResult(
+            content="",
+            tool_calls=[{"id": "d0", "name": "done", "arguments": {"message": "add implemented"}}],
+        )
 
     def _loop(self, blob: str, n_tools: int, tool_results: list[str]) -> CompletionResult:
         persona = self.persona

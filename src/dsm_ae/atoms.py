@@ -93,6 +93,7 @@ TASK_METRIC_BY_PACK: dict[str, str] = {
     "role_confusion_mini": "role_boundary_held",
     "slop_indicator": "c1_implements",
     "tact_drift_mini": "task_resolved",
+    "spec_drift_mini": "heldout_intent_held",
 }
 
 PROCESS_PACKS = frozenset(
@@ -114,6 +115,7 @@ PROCESS_PACKS = frozenset(
         "clarify_verify",
         "memory_context",
         "tact_drift_mini",
+        "spec_drift_mini",
     }
 )
 
