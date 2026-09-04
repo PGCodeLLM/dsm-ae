@@ -127,9 +127,10 @@ SWE-bench.
 
 ## What we run first
 
-GPT-family trajectories already on disk (`gpt-5*`, including `(max)`).
-Script: `scripts/analyze_intent_state.py` →
-`reports/intent-state/ANALYSIS.md`.
+Any trial dir that contains `litellm.jsonl` (`scripts/analyze_intent_state.py`).
+Tool calls and reasoning are reconstructed from those logs. Repro-shared
+`trial_*.json` without LiteLLM is not loaded.
+Output: `reports/intent-state/ANALYSIS.md`.
 
 Signal we look for:
 

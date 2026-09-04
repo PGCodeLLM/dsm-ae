@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Fingerprint TrialTraces and test whether procedures discriminate task outcome.
 
-Loads work-dir trajectories/ plus repro-shared trial_*.json, maps tool calls
+Loads work-dir trajectories that contain litellm.jsonl, maps tool calls
 to procgrep-style atoms, then:
 
   1. per-pack pass/fail n-gram contrast (log-odds)
@@ -59,6 +59,8 @@ def load_work_dir_trials(reports: Path) -> list[LoadedTrial]:
             if not d.is_dir() or "__t" not in d.name:
                 continue
             tj, sj = d / "traces.json", d / "scores.json"
+            if not (d / "litellm.jsonl").is_file():
+                continue
             if not tj.is_file():
                 continue
             try:
@@ -97,7 +99,7 @@ def load_work_dir_trials(reports: Path) -> list[LoadedTrial]:
     return out
 
 
-def load_repro_trials(reports: Path) -> list[LoadedTrial]:
+
     repro = reports / "repro-shared"
     if not repro.is_dir():
         return []
@@ -410,8 +412,8 @@ def main(argv: list[str] | None = None) -> int:
     args = ap.parse_args(argv)
 
     work = load_work_dir_trials(args.reports)
-    repro = load_repro_trials(args.reports)
-    trials = dedupe(work + repro)
+    # Repro-shared trial_*.json are not LiteLLM-sourced; skip.
+    trials = dedupe(work)
     labeled = [t for t in trials if t.task_passed is not None]
     process = [t for t in labeled if t.pack in PROCESS_PACKS]
 
@@ -429,7 +431,6 @@ def main(argv: list[str] | None = None) -> int:
         "n_trials": len(trials),
         "n_labeled": len(labeled),
         "n_work": len(work),
-        "n_repro": len(repro),
         "packs": sorted(per_pack),
         "per_pack": per_pack,
         "floor": floor,
@@ -440,7 +441,7 @@ def main(argv: list[str] | None = None) -> int:
     md = render_md(payload)
     (args.out / "ANALYSIS.md").write_text(md, encoding="utf-8")
     print(f"Wrote {args.out / 'ANALYSIS.md'} ({len(trials)} trials, {len(per_pack)} packs)")
-    print(f"  labeled={len(labeled)} work={len(work)} repro={len(repro)}")
+    print(f"  labeled={len(labeled)} litellm_work={len(work)}")
     return 0
 
 

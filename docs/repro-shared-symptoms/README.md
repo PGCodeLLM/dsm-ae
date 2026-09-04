@@ -55,18 +55,14 @@ corresponding **indicator pack** as a mini-testbed with **k=10 independent trial
 ## Run
 
 ```bash
-# Full matrix: 7 packs × 2 models × k=10
-# Historical sequential driver removed. Prefer:
-#   python3 scripts/run_repro_10_parallel_trials.py --help
-# or enqueue via `dsm-ae queue` / scripts/run_full_suite_via_queue.sh
-
-
-# Or single cell
+# LiteLLM-backed k=10 (source of truth: work_dir/trajectories/*/litellm.jsonl)
 dsm-ae diagnose -m gpt-5.5 --models-yaml models.yaml \
   -p coord_tax_mini --k 10 -j 2 --rpm 6 \
   --work-dir work/repro-shared/gpt-5.5/coord_tax_mini \
   --out reports/repro-shared/gpt-5.5/coord_tax_mini.md \
   --json reports/repro-shared/gpt-5.5/coord_tax_mini.json
+
+# Or enqueue: scripts/run_full_suite_via_queue.sh
 ```
 
 ## Success metric for “consistent reproduction”

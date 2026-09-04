@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+
 from dsm_ae.intent.label import label_trace
 from dsm_ae.intent.plan_exec import parse_plan_atoms, plan_exec_scores
 from dsm_ae.intent.tact_cal import tact_cal_ratios
@@ -147,6 +149,66 @@ def test_tact_cal_reread_is_oa():
     assert r["n"] == 3
     assert r["overact_ratio"] > 0
     assert r["calibrated_ratio"] > 0
+
+
+def test_reconstruct_from_litellm(tmp_path):
+    from dsm_ae.intent.litellm_load import reconstruct_from_litellm
+
+    recs = [
+        {
+            "request": {"model": "openai/Qwen3.8-27B-NVFP4-BF16-LMHead", "messages": []},
+            "response": {
+                "choices": [
+                    {
+                        "message": {
+                            "reasoning_content": "I will read notes.txt",
+                            "tool_calls": [
+                                {
+                                    "id": "c1",
+                                    "function": {
+                                        "name": "read_file",
+                                        "arguments": '{"path":"notes.txt"}',
+                                    },
+                                }
+                            ],
+                        }
+                    }
+                ]
+            },
+        },
+        {
+            "request": {
+                "model": "openai/Qwen3.8-27B-NVFP4-BF16-LMHead",
+                "messages": [
+                    {"role": "tool", "tool_call_id": "c1", "content": "gamma-k7p2-qx"}
+                ],
+            },
+            "response": {
+                "choices": [
+                    {
+                        "message": {
+                            "tool_calls": [
+                                {
+                                    "id": "c2",
+                                    "function": {
+                                        "name": "done",
+                                        "arguments": '{"message":"gamma-k7p2-qx"}',
+                                    },
+                                }
+                            ]
+                        }
+                    }
+                ]
+            },
+        },
+    ]
+    p = tmp_path / "litellm.jsonl"
+    p.write_text("\n".join(json.dumps(r) for r in recs), encoding="utf-8")
+    built = reconstruct_from_litellm(p)
+    assert built["model"] == "Qwen3.8-27B-NVFP4-BF16-LMHead"
+    assert [t["name"] for t in built["tool_calls"]] == ["read_file", "done"]
+    assert built["tool_calls"][0]["result"] == "gamma-k7p2-qx"
+    assert built["n_reasoning"] == 1
 
 
 def test_spec_drift_pack_scores_extra_api():
