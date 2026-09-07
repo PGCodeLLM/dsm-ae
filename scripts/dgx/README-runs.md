@@ -257,13 +257,26 @@ observed: 'test/api/Suite.ts | api tests (882 assertions)'  PASSED
           'test/api/Suite.ts | api tests (223 assertions)'  PASSED
 ```
 
-Exact-name matching cannot succeed here. Crucially, this is **not** an
-inherent grader bug: on the reference (real x86) harness **14/20 tutao
-instances scored > 0**, so the same grader works there. Our environment is
-producing a *different test partitioning* (882 + 223 assertions instead of one
-3029-assertion run) -- most likely because the suite shards by timing/CPU, and
-emulation changes that. Either way the reward under-reports success and would
-silently understate TypeScript performance.
+Exact-name matching cannot succeed here. This is **not** an inherent grader
+bug: on the reference (real x86) harness **14/20 tutao instances scored > 0**,
+so the same grader works there. Our environment produces a *different test
+partitioning* (882 + 223 assertions instead of one 3029-assertion run), most
+likely because the suite shards by timing/CPU and emulation changes that.
+
+**Scope: 1 task out of 43 non-Go tasks.** Scanning every sampled task's
+`tests/config.json` for expected names containing an assertion count:
+
+```
+tutao 1/2   element-hq 0/5   protonmail 0/6   nodebb 0/4
+ansible 0/9   internetarchive 0/9   qutebrowser 0/8
+```
+
+Only `instance_tutao__tutanota-5181821...` is affected -- and it happens to be
+the one task both TypeScript trials so far have run, which is why TS currently
+shows a misleading 0.000. **TypeScript as a language is fine**; the other 12
+TS/JS tasks use ordinary test names. `triage_rewards.py` now detects this task
+and marks such trials `ARTIFACT_GRADER_NAME_MISMATCH`, so it is excluded
+automatically rather than remembered.
 
 ### Mistake made during debugging (fixed)
 While probing, a bind-mount created an empty directory at
@@ -372,3 +385,54 @@ one have `reward.txt=0` but **no `trajectory.json`**, so they are useless for
 behaviour scoring even though they look scoreable by reward alone. Any
 re-run intended to feed `map_behaviour_to_task.py` must produce a trajectory,
 not just a reward.
+
+## 10. Observed: occasional per-trial agent stall (self-limiting, no action needed)
+
+One trial (`instance_protonmail__webclients__cENF6s2`, luna) sat at ~4% CPU
+with a **0-byte `agent/opencode.txt` for 73 minutes**. Diagnosis:
+
+- `opencode` process alive, but its log stops after "project copy refresh done"
+  and never reaches a `message=stream` line -- i.e. it never issued a model call.
+- **Not rate limiting**: no 429/retry/timeout signals in the opencode log.
+- **Not systemic**: the sibling protonmail trial on the *other* model was
+  actively streaming at the same moment, and both jobs show healthy stream
+  counts across trials (luna 1-34, terra 7-37 per trial).
+
+So it is an isolated per-trial hang, not a model, endpoint, or rpm problem.
+
+**It is self-limiting and needs no intervention:** the task's `timeout_sec =
+3000` with `--agent-timeout-multiplier 2` gives a hard 6000s (100 min) cap, so
+Harbor kills it ~01:55, and `--max-retries 1` grants one more attempt. Watch
+for `AgentTimeoutError` in the job log to confirm the cap fired.
+
+If stalls become frequent (say >10% of trials), that would change the picture
+and warrant investigating opencode's startup path under emulation -- but a
+single occurrence is expected noise at this concurrency.
+
+
+### Problem 15: orphaned container survives Harbor's own trial reap
+
+`instance_protonmail__webclients__cENF6s2` (luna) hit
+`AgentTimeoutError: Agent execution timed out after 6000.0 seconds`. Harbor
+reaped the *trial* correctly at 01:55 — `exception.txt` written, verifier
+directory created, no `reward.txt` — but the **environment container was left
+running**, still burning 103% CPU and 2.4GB an hour later.
+
+The tell that distinguishes this from a live-but-slow trial: `agent/opencode.txt`
+frozen at **0 bytes** while the container shows high CPU. A working trial's
+opencode.txt grows steadily (the healthy siblings were at 142KB and 182KB,
+touched within the minute). High CPU alone is not evidence of progress.
+
+Why it mattered here beyond wasted compute: `switch_nogo.sh` gates on
+`docker ps | grep instance` reaching zero before switching datasets. An
+orphan that never exits blocks that drain **indefinitely** — the switch would
+have sat until its 2h deadline and then fired mid-trial anyway, which is
+exactly what the drain gate exists to avoid.
+
+Resolved with `docker rm -f` on that one container after confirming from
+`exception.txt` that the trial was already dead. Harbor's `--max-retries 1`
+grants the instance another attempt.
+
+**Check to run before trusting a drain gate:** cross-reference container
+liveness against agent-log growth, not container status. A container in
+`docker ps` is not proof a trial is alive.
