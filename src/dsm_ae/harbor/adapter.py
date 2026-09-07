@@ -55,6 +55,7 @@ class HarborTrial:
     repo: str
     language: str
     reward: float | None
+    n_tests_run: int | None = None  # None = verifier output absent/unparsed
     tool_calls: list[dict[str, Any]] = field(default_factory=list)
     reasoning: list[str] = field(default_factory=list)
     messages: list[str] = field(default_factory=list)
@@ -64,8 +65,23 @@ class HarborTrial:
     task_prompt: str = ""
 
     @property
+    def scoreable(self) -> bool:
+        """False when the verifier ran zero tests, so the reward measured nothing.
+
+        A trial whose `verifier/output.json` carries an empty `tests` list was
+        scored 0 without any test executing — a broken harness/exec path, not a
+        model failure. Counting those as failures inflates the failure rate of
+        whichever ecosystem happens to be affected (in these bundles, Go: 20.8%
+        of Go trials vs 1.1% of Python), which would manufacture exactly the
+        language-deficit conclusion this study exists to rule out. Trials with
+        no `output.json` at all are left scoreable — absence of the file is not
+        evidence that nothing ran.
+        """
+        return self.n_tests_run != 0
+
+    @property
     def success(self) -> bool | None:
-        if self.reward is None:
+        if self.reward is None or not self.scoreable:
             return None
         return self.reward >= 1.0
 
@@ -155,6 +171,18 @@ def load_trial(inst_dir: Path, *, run: str) -> HarborTrial | None:
         except ValueError:
             reward = None
 
+    # How many tests the verifier actually executed. Zero means the reward is
+    # not a measurement of the model — see HarborTrial.scoreable.
+    n_tests_run: int | None = None
+    vo = inst_dir / "verifier" / "output.json"
+    if vo.exists():
+        try:
+            vd = json.loads(vo.read_text())
+        except (json.JSONDecodeError, OSError):
+            vd = None
+        if isinstance(vd, dict) and isinstance(vd.get("tests"), list):
+            n_tests_run = len(vd["tests"])
+
     trial_name = str(result.get("trial_name") or inst_dir.name)
     task_name = str(result.get("task_name") or "")
     source = str(result.get("source") or "").strip()
@@ -206,6 +234,7 @@ def load_trial(inst_dir: Path, *, run: str) -> HarborTrial | None:
         repo=repo,
         language=REPO_LANG.get(repo, "python" if source.startswith("nl2repo") else "unknown"),
         reward=reward,
+        n_tests_run=n_tests_run,
         tool_calls=calls,
         reasoning=reasoning,
         messages=messages,

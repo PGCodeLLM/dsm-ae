@@ -38,11 +38,13 @@ metrics at *your* Harbor task trajectories and you get a behaviour×task weight
 matrix for *your* task family. The packs are the closed-course elicitation;
 your real tasks are the on-road exam.
 
-The first real mapping is in: on 1410 SWE-bench-Pro trials scored against the
-benchmark's own verifier, stopping without editing and silencing a test predict
-failure robustly, across every ecosystem and difficulty band. The
-sprawl-and-thrash family predicts failure too — but cannot yet be separated
-from task difficulty, and we say so (§3.4).
+The first real mapping is in: on 1271 SWE-bench-Pro trials scored against the
+benchmark's own verifier, silencing a test predicts failure robustly across
+every ecosystem and difficulty band. The sprawl-and-thrash family predicts
+failure too — but cannot yet be separated from task difficulty, and we say so.
+Auditing the oracle also caught 139 trials scored `0` while running zero
+tests, mostly Go; excluding them cut the apparent language gap from 17 points
+to 5 (§3.4).
 
 ---
 
@@ -286,37 +288,56 @@ The real corpus has landed. `evalhub-runs/` holds SWE-bench-Pro and
 NL2Repo-Bench trajectory bundles whose success label is the **benchmark
 verifier's reward**, not a DSM-AE gate — which is the whole requirement.
 `src/dsm_ae/harbor/` ingests them and `scripts/map_behaviour_to_task.py`
-scores twelve off-policy instruments against 1410 labelled SWE-bench-Pro
-trials (798 pass / 612 fail) across 11 repos and four ecosystems
+scores twelve off-policy instruments against 1271 labelled SWE-bench-Pro
+trials (798 pass / 473 fail) across 11 repos and four ecosystems
 (`reports/behaviour-task/MAPPING.md`).
+
+**One correction, because it changes the headline.** An initial pass used
+1410 trials and reported a large language gap. Auditing the verifier output
+showed that 139 of those trials were scored `0` while running **zero tests** —
+an empty `tests` list in `verifier/output.json`, i.e. a broken exec path in the
+grading harness, not a model failure. The artifact is badly skewed: 102 Go,
+31 TypeScript, 6 Python. Left in, it inflated Go's failure rate from 41.1% to
+53.4% and would have manufactured exactly the "this model is weak at Go"
+conclusion the study exists to rule out. Those trials are now dropped by
+`HarborTrial.scoreable` and itemized in the report. The real language spread
+is much narrower than first reported — Go 41.1% vs Python 36.1%, a 5-point
+gap, not 17.
 
 Off-policy means the instruments make no reference to a toy fixture. `2+2=5`
 cannot transfer; *"patched a file whose contents were never read"* transfers to
 any repo in any language. Each is a structural analogue of a pack gate, not the
 gate itself.
 
-The language confound is the first thing to beat. In one run Go instances fail
-at 51.9% and Python at 30.5%, so any instrument correlated with ecosystem
-inherits that gap and looks causal. The table reports a **language-stratified**
-risk difference (`RD*`, CMH-pooled within ecosystem) beside the raw one. It also
-reports `RD**`, additionally stratified on a difficulty proxy
+Even after that cleanup the language confound is real and worth controlling:
+Go fails at 41.1% and Python at 36.1%, so any instrument correlated with
+ecosystem inherits some of that gap. The table reports a
+**language-stratified** risk difference (`RD*`, CMH-pooled within ecosystem)
+beside the raw one, and `RD**`, additionally stratified on a difficulty proxy
 (trajectory-length quartile within language).
 
-Both controls matter, and they do not agree. Six instruments are significant
+Both controls matter, and they do not agree. Five instruments are significant
 after multiplicity correction; here is what survives each stage:
 
 | Instrument | Anchor | RD | RD* lang | RD** lang×diff | q |
 |---|---|---:|---:|---:|---:|
-| `premature_stop` (never edited) | PCD | +0.575 | +0.573 | **+0.726** | 4.4e-08 |
-| `test_suppression` (wrote skip/xfail) | EGD | +0.296 | +0.305 | **+0.248** | 0.004 |
-| `scope_creep` (>8 files edited) | OASD | +0.183 | +0.162 | +0.034 | 1.7e-06 |
-| `destructive_command` | OASD | +0.138 | +0.135 | +0.064 | 0.001 |
-| `thrash_edit` (one file >4×) | ISDS | +0.111 | +0.109 | +0.022 | 0.0002 |
-| `read_loop` (one path >3×) | PCD | +0.097 | +0.108 | +0.020 | 0.0009 |
+| `test_suppression` (wrote skip/xfail) | EGD | +0.300 | +0.303 | **+0.232** | 0.011 |
+| `scope_creep` (>8 files edited) | OASD | +0.176 | +0.181 | +0.066 | 1.7e-05 |
+| `thrash_edit` (one file >4×) | ISDS | +0.124 | +0.122 | +0.046 | 3.6e-05 |
+| `read_loop` (one path >3×) | PCD | +0.113 | +0.117 | +0.039 | 0.0001 |
+| `destructive_command` | OASD | +0.104 | +0.111 | +0.046 | 0.032 |
 
 **All four agency/control instruments survive the language control and then
 collapse under the difficulty control.** Reporting only `RD*` would have been
 the flattering result, and it would have been misleading.
+
+`premature_stop` deserves a note: it has the largest effect in the table
+(RD +0.634, and it *strengthens* to +0.760 under joint stratification) and
+every one of its 13 cases failed. But 13 is below the threshold where a rate
+means much, so it is marked `underpowered` rather than promoted. Removing the
+zero-test artifacts cut its sample from 23 to 13 — a reminder that the
+artifacts were concentrated in exactly the degenerate runs most likely to look
+like a striking finding.
 
 The honest reading is that the difficulty column is a *stress test*, not a
 verdict, because trace length is **endogenous**: `thrash_edit` and `read_loop`
@@ -327,13 +348,13 @@ sprawl/thrash family we **cannot currently separate** "the behaviour hurt the
 task" from "the task was hard, which produced both the behaviour and the
 failure." That is an open question, not a finding in either direction.
 
-Two results are not vulnerable to that objection. `premature_stop` and
-`test_suppression` are *short*-trace behaviours — length adjustment cannot
-manufacture them — and both **strengthen** under joint stratification
-(+0.726 and +0.248). An agent that stops without editing anything, or that
-silences a test instead of fixing it, fails the job at a dramatically higher
-rate within any ecosystem and any difficulty band. Those fire on only 3.8% and
-3.4% of failures respectively: real, rare, and unambiguous.
+One result is not vulnerable to that objection. `test_suppression` is a
+*short*-trace behaviour — length adjustment cannot manufacture it — and it
+**strengthens** under joint stratification to +0.232 (q=0.011). An agent that
+silences a test instead of fixing it fails the job at a markedly higher rate
+within any ecosystem and any difficulty band. It fires on only 3.4% of
+failures: real, rare, and unambiguous. `premature_stop` points the same way
+even harder (+0.760) but at n=13 is not yet a rate worth quoting.
 
 `edited_test_files` fires on 84% of runs and predicts *nothing* (q=0.48). On
 SWE-bench-Pro, touching tests is usually part of a legitimate fix. That null is

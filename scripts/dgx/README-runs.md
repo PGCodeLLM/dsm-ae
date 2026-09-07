@@ -56,22 +56,45 @@ own `swebenchpro.yaml` does. The output layout is identical, which is what
 | 10 | NL2Repo verifier wrote reward to the wrong path | Harbor reads `/logs/verifier/reward.txt`, not `/logs/reward.txt`. Fixed; re-verified with the `nop` agent (0 exceptions, reward `0.000000`). |
 | 11 | `AgentSetupTimeoutError` after 360 s | opencode's setup runs `apt-get install nodejs npm`, which is very slow under x86 emulation. Runs use `--agent-setup-timeout-multiplier 12`. |
 | 12 | `more-Itertools` failed to build: *repository name must be lowercase* | The upstream `test_files/` dir keeps the package's original casing, but the published GHCR image is all-lowercase. The generator now lowercases the image ref only (the task dir name keeps upstream casing). Task regenerated; see "Known follow-up" below. |
+| 13 | NL2Repo agent setup died: `apt-get update` → `404 Not Found` / *"does not have a Release file"* | The upstream images pin **Debian buster (10) / bullseye (11)**, both archived. Harbor's opencode `install()` calls `ensure_system_dependencies(curl, bash, coreutils, nodejs, npm)`; the images ship curl/bash/stdbuf but **no node/npm**, so it fell through to `apt-get install -y ... nodejs npm` against dead mirrors. Fixed in the generator's Dockerfile (`build_nl2repo_tasks.py`): (a) archived suites are repointed at `archive.debian.org` with `Acquire::Check-Valid-Until "false"`, and (b) a **pinned, sha256-checksummed Node v22.23.2 tarball** is unpacked into `/usr/local`, which makes Harbor's dependency check short-circuit so apt is never invoked at all. |
 
-### Known follow-up
+### Repair run (2026-09-07)
 
-`more-Itertools` failed early in **both** NL2Repo jobs (before the casing fix
-landed). Its task definition is now correct, but the two running jobs still
-hold the old plan. After the current jobs finish, re-run just that instance:
+7 of the 20 NL2Repo trials and 3 of the SWE-bench-Pro trials raised exceptions.
+Three distinct causes:
+
+1. **Archived Debian apt repos** (problem 13 above) — `deepdiff` and
+   `flask-restful`, in both jobs. Genuine setup failures; fixed in the
+   generator and re-run.
+2. **`more-Itertools` image-ref casing** (problem 12 above) — both jobs held
+   the pre-fix plan. Re-run.
+3. **Model-side 429 `model_cooldown`** — `mechanicalsoup` (terra) plus all
+   three SWE-bench-Pro exceptions
+   (`instance_gravitational__teleport__{iZwFoLH,bq6dyKb}`,
+   `instance_tutao__tutanota-5181821__DD4qHmQ`). opencode's *run* phase, not
+   setup: the endpoint returned
+   `All credentials for model gpt-5.6-{terra,luna} are cooling down via
+   provider codex` (HTTP 429, ~2.5 h reset). Each `agent/opencode.txt` holds
+   exactly one event, that error. These are **not** environment bugs and need
+   no code fix — they need re-running once the credential pool is warm, at
+   rpm 6. All three SWE-bench-Pro ones already carry `reward.txt=0`, so they
+   are scoreable but agent-less (no `trajectory.json`).
+
+The repair run for causes 1 and 2 uses a separate dataset and jobs dir so the
+main jobs are untouched:
 
 ```bash
 # on the DGX
-mkdir -p ~/dsm-dgx/datasets/nl2repo-fixup
-cp -r ~/dsm-dgx/datasets/nl2repobench/more-Itertools ~/dsm-dgx/datasets/nl2repo-fixup/
-# then point a copy of configs/nl2repobench-{terra,luna}.yaml at that dir
-# (change `jobs_dir` too so it lands beside the main run) and launch as usual.
+python3 ~/dsm-dgx/build_nl2repo_tasks.py \
+  --out ~/dsm-dgx/datasets/nl2repo-fixup \
+  --instances deepdiff flask-restful more-Itertools
+# configs/nl2repobench-fixup-{terra,luna}.yaml -> jobs_dir ~/dsm-dgx/runs-fixup
+tmux new-session -d -s dsm-nl2repobench-fixup-terra "harbor run -c ~/dsm-dgx/configs/nl2repobench-fixup-terra.yaml ..."
 ```
 
-The other 9 NL2Repo instances and all 70 SWE-bench-Pro instances are unaffected.
+Concurrency stays at `n_concurrent_trials: 2` per job to respect rpm 6.
+The output layout under `runs-fixup/` is identical, so
+`src/dsm_ae/harbor/adapter.py` reads it unchanged.
 
 ## 4. Sample selection
 
@@ -125,3 +148,158 @@ emitted in the same ATIF schema as the reference bundles.
 `models.yaml` pins **rpm 6** for both models. Each job uses
 `n_concurrent_trials: 2`, so at most 8 agents are in flight with all four jobs
 running. Do not raise this without raising rpm.
+
+## 9. OPEN ISSUE: SWE-bench-Pro rewards are not yet trustworthy
+
+**Status: under investigation. Do NOT report the current SWE-bench-Pro zeros
+as model performance.**
+
+The first SWE-bench-Pro rewards came back 6/6 zero. Investigating rather than
+accepting them turned up **two independent infrastructure artifacts**, plus a
+strong control that proves they are artifacts:
+
+**Control.** The reference bundles (same tasks, real x86 harness) score
+navidrome 0.526, gravitational 0.583, tutao 0.700. Getting 0.000 on those exact
+repos is not a plausible model result -- it is our environment.
+
+### Artifact A -- Go verifiers produce zero test results (root cause pending)
+The four Go trials (navidrome, gravitational) all wrote `reward=0` with
+`verifier/output.json == {"tests": []}` -- **zero tests ran**, so those rewards
+measured nothing.
+
+Two false leads were chased and are recorded here so they are not repeated:
+
+1. *"Go's GC crashes under QEMU."* The navidrome verifier log does contain
+   `fatal error: lfstack` from inside the Go runtime, which looked like a
+   known QEMU multi-threaded-GC defect. Real, but not established as the cause.
+2. *"The Go images cannot exec under emulation."* `docker run ... <img>
+   /bin/sh` returns `cannot execute binary file`. This turned out to be a
+   **probe artifact, not a defect**: in the same image `/usr/bin/bash`,
+   `/bin/bash` and the explicit loader all run fine and print `x86_64`, and
+   `go version` reports `go1.24.3 linux/amd64`. The ansible image -- whose
+   trial produced a perfectly good result -- fails the identical `/bin/sh`
+   probe. So `/bin/sh` says nothing about whether a task works.
+
+**ROOT CAUSE CONFIRMED.** The Go images are valid amd64 (ELF `3e 00`), contain
+the x86-64 loader, and `go version` reports `go1.24.3 linux/amd64` -- the
+toolchain itself is fine. But running the task's own test target on a **clean
+checkout with no agent involved** reproduces the crash deterministically:
+
+```
+cd /app && go test -tags netgo -run TestPersistence ./persistence/...
+  default GOMAXPROCS   -> fatal error: lfstack
+  GOMAXPROCS=1 -p 1    -> fatal error: lfstack
+```
+
+So the Go runtime's lock-free stack corrupts under `qemu-x86_64` regardless of
+parallelism. **Serialising does not help**, which rules out the obvious
+multi-threaded-GC mitigation. This is an emulator/runtime incompatibility, not
+anything the model or the harness did. It is fully reproducible in one command,
+which makes it easy to re-check on a different host or QEMU version.
+
+**All mitigations tried have FAILED:**
+
+| setting | result |
+|---|---|
+| default | `fatal error: lfstack` |
+| `GOMAXPROCS=1 -p 1` | `fatal error: lfstack` |
+| `GODEBUG=asyncpreemptoff=1` | `fatal error: lfstack` |
+| `GOGC=off` | `SIGSEGV` |
+| `GODEBUG=asyncpreemptoff=1 GOGC=off` | `SIGSEGV` |
+
+Serialising, disabling async preemption, and disabling the GC all fail, so this
+is not a tunable-parameter problem. **Conclusion: Go tests are not runnable
+under qemu-x86_64 on this aarch64 box.** The 27 Go instances (39% of the
+SWE-bench-Pro sample: flipt-io 8, gravitational 7, future-architect 6,
+navidrome 6) cannot be measured on this hardware.
+
+### Required decision (needs a human)
+
+1. **Run the Go subset on a real x86_64 host.** Only option that yields the
+   full stratified sample the study was designed around. Everything needed is
+   reproducible: `build_sample_manifest.py` (seed 42) plus the swebenchpro
+   adapter regenerate the identical 27 tasks anywhere.
+2. **Report Python/TypeScript/JavaScript only**, stating explicitly that Go was
+   not measurable on this hardware. Honest, but it removes the Go arm and
+   weakens the language-vs-agentic comparison, since Go is the largest
+   non-Python stratum.
+
+Do **not** silently report the Go zeros. `triage_rewards.py` marks them
+`ARTIFACT_NO_TESTS_RAN` and excludes them from per-language rates specifically
+so this cannot happen by accident.
+
+**Cost note (matters for the decision).** Go trials are *not* cheap. The agent
+runs to completion first and only then does the verifier fail:
+
+```
+gravitational  agent_execution 23:53:51 -> 00:03:47  (~10 min), verifier 16s
+navidrome      agent_execution 22:46:54 -> 23:21:06  (~34 min), verifier 13s
+```
+
+So each Go trial spends real model tokens producing a patch that can never be
+scored. Across 27 Go instances x 2 models = 54 trials, that is a substantial
+amount of spend on unmeasurable results.
+
+Given rpm=6, those trials also occupy scarce request budget that the
+measurable Python/TS/JS trials could use. If the decision is to defer Go to
+real x86 hardware, the cheapest action is to **restart the two SWE-bench-Pro
+jobs against a Go-free dataset directory** (the 43 non-Go tasks), rather than
+let the current jobs work through all 27 Go instances twice. The NL2Repo jobs
+are unaffected and should be left alone.
+
+### Artifact B -- tutao (TypeScript) reward is mis-scored
+The tutao trials **passed** their tests, but scored 0. The task's expected test
+name embeds an assertion count that changes with the code:
+
+```
+required: 'test/api/Suite.ts | api tests (3029 assertions)'
+observed: 'test/api/Suite.ts | api tests (882 assertions)'  PASSED
+          'test/api/Suite.ts | api tests (223 assertions)'  PASSED
+```
+
+Exact-name matching cannot succeed here. Crucially, this is **not** an
+inherent grader bug: on the reference (real x86) harness **14/20 tutao
+instances scored > 0**, so the same grader works there. Our environment is
+producing a *different test partitioning* (882 + 223 assertions instead of one
+3029-assertion run) -- most likely because the suite shards by timing/CPU, and
+emulation changes that. Either way the reward under-reports success and would
+silently understate TypeScript performance.
+
+### Mistake made during debugging (fixed)
+While probing, a bind-mount created an empty directory at
+`/usr/bin/qemu-x86_64` on the host, clobbering the binfmt interpreter path.
+The `F` (fix-binary) flag kept a cached fd alive so existing runs were not
+disturbed, but new containers mounting that path broke. Removed the stray
+directory and reinstalled the real qemu binary (8.1 MB, from
+`tonistiigi/binfmt`) at that path; `alpine` amd64 exec re-verified. The four
+production jobs were checked before and after and were unaffected
+(10 processes, 8 env containers, same reward counts).
+
+### What must NOT happen
+Reporting emulator-induced zeros as "the model is weak at Go", or grader-induced
+zeros as "weak at TypeScript", would fabricate exactly the language-deficit
+conclusion this study exists to distinguish from genuine agentic deficits.
+Quarantine SWE-bench-Pro rewards until A and B are resolved.
+
+NL2Repo-Bench (Python) is unaffected and is producing well-spread, plausible
+rewards (0.98, 1.0, 0.0).
+
+### Prepared, but NOT activated (awaiting the decision above)
+
+`~/dsm-dgx/datasets/swebenchpro-nogo/` is staged on the DGX: symlinks to the
+**43 non-Go tasks** (ansible 9, internetarchive 9, qutebrowser 8, protonmail 6,
+element-hq 5, nodebb 4, tutao 2). Nothing points at it yet -- the four original
+jobs are still running unchanged.
+
+To switch the SWE-bench-Pro jobs onto it (only if option 2 is chosen):
+
+```bash
+tmux kill-session -t dsm-swebenchpro-terra
+tmux kill-session -t dsm-swebenchpro-luna
+sed -i 's|datasets/swebenchpro$|datasets/swebenchpro-nogo|' \
+  ~/dsm-dgx/configs/swebenchpro-terra.yaml ~/dsm-dgx/configs/swebenchpro-luna.yaml
+~/dsm-dgx/launch_runs.sh swebenchpro-terra swebenchpro-luna
+```
+
+Harbor skips trials it has already completed in the same `jobs_dir`, so the
+finished Python/TS/JS trials are preserved.

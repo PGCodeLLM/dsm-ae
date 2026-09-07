@@ -46,12 +46,68 @@ The requirements document is at /workspace/start.md. The existing tests under
 /workspace/tests define the expected behaviour; do not modify them.
 """
 
+# Pinned Node runtime. The NL2Repo base images ship no node/npm, and Harbor's
+# opencode agent setup reacts to that by running `apt-get install nodejs npm`.
+# Both are pinned to archived Debian releases (buster / bullseye), so that
+# apt-get dies with 404s and the trial never reaches the agent. Staging a
+# pinned, checksummed Node tarball makes Harbor's `ensure_system_dependencies`
+# short-circuit (it returns early once node/npm/curl/bash/stdbuf all resolve),
+# so apt is never invoked at all.
+NODE_VERSION = "v22.23.2"  # LTS "Jod"
+NODE_SHA256 = "d60acfe00a2932254bb0ad20e01b0d74397a0875595de719654b214f4b03f307"
+
 DOCKERFILE = """\
 # NL2Repo-Bench ships pre-built environments on GHCR.
 FROM {image}
 
 # Reset entrypoint so the harness can run its own command.
 ENTRYPOINT []
+
+# --- Debian EOL apt repair -------------------------------------------------
+# The upstream images pin buster/bullseye. Those suites are archived, so
+# deb.debian.org / security.debian.org answer 404 ("does not have a Release
+# file") and any apt-get in the image fails. Repoint archived suites at
+# archive.debian.org and stop apt rejecting the long-expired Release files.
+# Non-archived (or non-Debian) bases are left untouched.
+RUN set -eux; \
+    if [ -r /etc/os-release ]; then . /etc/os-release; fi; \
+    suite="${{VERSION_CODENAME:-}}"; \
+    case "$suite" in \
+      jessie|stretch|buster|bullseye) \
+        rm -f /etc/apt/sources.list.d/*.list /etc/apt/sources.list.d/*.sources || true; \
+        printf 'deb http://archive.debian.org/debian %s main\\n' "$suite" > /etc/apt/sources.list; \
+        if [ "$suite" = "buster" ] || [ "$suite" = "stretch" ] || [ "$suite" = "jessie" ]; then \
+          printf 'deb http://archive.debian.org/debian-security %s/updates main\\n' "$suite" >> /etc/apt/sources.list; \
+        else \
+          printf 'deb http://archive.debian.org/debian-security %s-security main\\n' "$suite" >> /etc/apt/sources.list; \
+        fi; \
+        printf 'Acquire::Check-Valid-Until "false";\\nAcquire::AllowInsecureRepositories "true";\\n' \
+          > /etc/apt/apt.conf.d/99dsm-archive; \
+        ;; \
+    esac
+
+# --- Pinned Node runtime ---------------------------------------------------
+# Checksummed official tarball, so this is deterministic and does not depend on
+# any distro package feed. Installing it here means Harbor's opencode setup
+# skips its apt-get path entirely.
+RUN set -eux; \
+    if ! command -v node >/dev/null 2>&1 || ! command -v npm >/dev/null 2>&1; then \
+      arch="$(uname -m)"; \
+      case "$arch" in \
+        x86_64) narch=x64 ;; \
+        aarch64|arm64) narch=arm64 ;; \
+        *) echo "unsupported arch $arch" >&2; exit 1 ;; \
+      esac; \
+      tarball="node-{node_version}-linux-$narch.tar.xz"; \
+      curl -fsSL -o /tmp/node.tar.xz "https://nodejs.org/dist/{node_version}/$tarball"; \
+      if [ "$narch" = "x64" ]; then \
+        echo "{node_sha256}  /tmp/node.tar.xz" | sha256sum -c -; \
+      fi; \
+      tar -xJf /tmp/node.tar.xz -C /usr/local --strip-components=1 \
+        --exclude CHANGELOG.md --exclude LICENSE --exclude README.md; \
+      rm -f /tmp/node.tar.xz; \
+    fi; \
+    node --version; npm --version
 
 WORKDIR /workspace
 
@@ -137,7 +193,11 @@ def build_task(name: str, out_dir: Path) -> None:
     # test_files/ dirs preserve the package's original casing (e.g.
     # "more-Itertools"), but the published GHCR image is all-lowercase.
     (task / "environment" / "Dockerfile").write_text(
-        DOCKERFILE.format(image=IMAGE.format(name=name.lower()))
+        DOCKERFILE.format(
+            image=IMAGE.format(name=name.lower()),
+            node_version=NODE_VERSION,
+            node_sha256=NODE_SHA256,
+        )
     )
 
     # Run the benchmark's own commands, but tee stdout and add a json report to

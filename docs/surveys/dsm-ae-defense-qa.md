@@ -430,19 +430,22 @@ These require new work. Do not paper over them in the blog.
    license analogy in a paper abstract.
    **PARTIALLY CLOSED 2026-09-06.** `src/dsm_ae/harbor/` +
    `scripts/map_behaviour_to_task.py` produce the first
-   behaviour→task mapping on an oracle we do not own: 1410 labelled
-   SWE-bench-Pro trials (798 pass / 612 fail), 11 repos, 4 ecosystems,
-   verifier reward as `y` (`reports/behaviour-task/MAPPING.md`).
-   Robust to **both** language and difficulty stratification:
-   `premature_stop` (PCD, RD** +0.726, q=4.4e-08) and
-   `test_suppression` (EGD, RD** +0.248, q=0.004) — both are
-   short-trace behaviours, so length adjustment cannot manufacture
-   them. Survive language but **collapse** under difficulty:
-   `scope_creep` (+0.162 → +0.034), `destructive_command`
-   (+0.135 → +0.064), `thrash_edit` (+0.109 → +0.022), `read_loop`
-   (+0.108 → +0.020). Still open: one task family, one scaffold, one
-   harness; code review / on-call unmeasured; and the sprawl family
-   needs an exogenous difficulty label (see Q16).
+   behaviour→task mapping on an oracle we do not own: **1271**
+   labelled SWE-bench-Pro trials (798 pass / 473 fail), 11 repos,
+   4 ecosystems, verifier reward as `y`
+   (`reports/behaviour-task/MAPPING.md`). Robust to **both** language
+   and difficulty stratification: `test_suppression` (EGD, RD**
+   +0.232, q=0.011) — a short-trace behaviour, so length adjustment
+   cannot manufacture it. Survive language but **collapse** under
+   difficulty: `scope_creep` (+0.181 → +0.066), `thrash_edit`
+   (+0.122 → +0.046), `read_loop` (+0.117 → +0.039),
+   `destructive_command` (+0.111 → +0.046). `premature_stop` has the
+   largest effect (RD** +0.760) but n=13 → `underpowered`, not
+   promoted.
+   **An earlier revision of this entry cited 1410 trials and a
+   6-instrument result. It was wrong — see Q17.** Still open: one task
+   family, one scaffold, one harness; code review / on-call
+   unmeasured; sprawl family needs an exogenous difficulty label (Q16).
 
 ---
 
@@ -583,3 +586,60 @@ In order of leverage, without expanding compaction:
 
 Do not raise k to 20 on the current toys and call that industrial
 significance.
+
+### Q17. You trusted the outer oracle. Did you audit it?
+
+**Not at first — and that was the single largest error in this work.**
+
+The whole non-circularity argument rests on `y` coming from a
+verifier we do not control. That independence is the point, but it
+quietly imports a new assumption: **that the verifier actually ran.**
+
+It often did not. 139 of 1410 SWE-bench-Pro trials carry a reward of
+`0` alongside an empty `tests` list in `verifier/output.json` — scored
+as failures without a single test executing. That is a broken
+harness/exec path, not a model failure.
+
+The distribution is what makes this dangerous rather than merely
+noisy:
+
+| Language | trials | zero-test artifacts | share |
+|---|---:|---:|---:|
+| go | 519 | 102 | 19.7% |
+| typescript | 280 | 31 | 11.1% |
+| python | 532 | 6 | 1.1% |
+| javascript | 88 | 0 | 0% |
+
+Counting those as failures inflated Go's failure rate from **41.1% to
+53.4%** and TypeScript's from 35.3% to 42.5%, while barely touching
+Python. The first version of this analysis reported that inflated
+gap as *the language confound* — i.e. it manufactured, from a grading
+bug, exactly the "weak at Go" conclusion the stratification was built
+to rule out. The confound control was itself confounded.
+
+Downstream effects of the fix: `premature_stop` fell from n=23 to
+n=13 and is now `underpowered` rather than a headline. The artifacts
+were concentrated in degenerate runs — short trajectories that never
+edited anything — which are precisely the runs most likely to look
+like a dramatic finding.
+
+**Fix, implemented:** `HarborTrial.scoreable` returns `False` when the
+verifier executed zero tests; such trials are dropped from `y` and
+itemized in `MAPPING.md`. Trials with no `output.json` at all are left
+scoreable — absence of the file is not evidence that nothing ran.
+
+**Generalizable lesson, and the reason this is a numbered Q rather
+than a changelog line:** an external oracle removes *circularity*, not
+*measurement error*. "The oracle is independent" and "the oracle is
+correct" are different claims, and only the first was ever checked.
+Any bring-your-own-Harbor-task user inherits this: audit that your
+verifier ran before trusting a reward of 0, and check whether failures
+to run are correlated with a stratum. If they are, every stratified
+estimate downstream is contaminated.
+
+**Still unresolved:** a related grader artifact where a suite *passes*
+but scores 0 because the expected test name embeds an assertion count
+that shifts with the code (observed on `tutao`). That inflates
+TypeScript failures specifically. It is detected but not yet excluded,
+because "passed but mis-scored" has no clean structural signature the
+way "zero tests ran" does.

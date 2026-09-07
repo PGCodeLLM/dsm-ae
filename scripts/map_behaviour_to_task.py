@@ -328,6 +328,7 @@ def _fmt_pct(x: float) -> str:
 def render_markdown(
     blocks: list[tuple[str, int, int, list[Association]]],
     lang_table: dict[str, dict[str, Counter]],
+    excluded: Counter | None = None,
 ) -> str:
     out: list[str] = []
     out.append("# Behaviour → task-outcome mapping\n")
@@ -380,6 +381,23 @@ def render_markdown(
                 f"| {srd} | {jrd} | {r.fisher_q:.3g} | {r.verdict} |\n"
             )
 
+    if excluded:
+        total_ex = sum(excluded.values())
+        out.append("\n## Excluded: trials where the verifier ran zero tests\n")
+        out.append(
+            f"\n{total_ex} trials carried a reward but an empty `tests` list in\n"
+            "`verifier/output.json` — scored 0 without a single test executing.\n"
+            "That is a broken harness/exec path, not a model failure, so these are\n"
+            "dropped rather than counted as failures.\n"
+            "\nThis matters because the artifact is **not** evenly distributed. Left\n"
+            "in, it inflates the failure rate of whichever ecosystem it hits and\n"
+            "manufactures precisely the language-deficit conclusion this study\n"
+            "exists to rule out.\n"
+        )
+        out.append("\n| Language | excluded |\n|---|---:|\n")
+        for lang, n in sorted(excluded.items(), key=lambda kv: -kv[1]):
+            out.append(f"| {lang} | {n} |\n")
+
     out.append("\n## Language base rates (the confound)\n")
     out.append(
         "\nIf failure rate varies sharply by ecosystem, any instrument correlated\n"
@@ -423,19 +441,26 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     by_source: dict[str, list[HarborTrial]] = defaultdict(list)
     lang_table: dict[str, dict[str, Counter]] = {}
+    excluded: Counter = Counter()
 
     for run_name, trials in iter_runs(args.root):
         if not trials:
             continue
         langs: dict[str, Counter] = defaultdict(Counter)
         for t in trials:
+            if t.reward is not None and not t.scoreable:
+                excluded[t.language] += 1
             if t.success is None:
                 continue
             langs[t.language]["pass" if t.success else "fail"] += 1
         lang_table[run_name] = dict(langs)
         for t in trials:
             by_source[t.source].append(t)
-        print(f"loaded {run_name}: {len(trials)} trials")
+        n_ex = sum(1 for t in trials if t.reward is not None and not t.scoreable)
+        print(f"loaded {run_name}: {len(trials)} trials ({n_ex} excluded: zero tests ran)")
+
+    if excluded:
+        print("excluded zero-test trials by language:", dict(excluded))
 
     blocks: list[tuple[str, int, int, list[Association]]] = []
     payload: dict[str, object] = {"sources": {}}
@@ -460,6 +485,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         run: {lang: dict(c) for lang, c in langs.items()}
         for run, langs in lang_table.items()
     }
+    payload["excluded_zero_test_trials"] = dict(excluded)
     payload["instruments"] = {
         ins.key: {"anchor": ins.anchor, "det": ins.det, "doc": ins.doc}
         for ins in INSTRUMENTS
@@ -468,7 +494,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     args.out.parent.mkdir(parents=True, exist_ok=True)
     args.out.write_text(json.dumps(payload, indent=2))
     args.md.parent.mkdir(parents=True, exist_ok=True)
-    args.md.write_text(render_markdown(blocks, lang_table))
+    args.md.write_text(render_markdown(blocks, lang_table, excluded))
     print(f"wrote {args.out} and {args.md}")
     return 0
 
