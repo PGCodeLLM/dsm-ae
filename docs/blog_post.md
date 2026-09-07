@@ -38,7 +38,7 @@ metrics at *your* Harbor task trajectories and you get a behaviour×task weight
 matrix for *your* task family. The packs are the closed-course elicitation;
 your real tasks are the on-road exam.
 
-The first real mapping is in: on 1257 SWE-bench-Pro trials scored against the
+The first real mapping is in: on 1260 SWE-bench-Pro trials scored against the
 benchmark's own verifier, silencing a test predicts failure robustly across
 every ecosystem and difficulty band. The sprawl-and-thrash family predicts
 failure too — but cannot yet be separated from task difficulty, and we say so.
@@ -289,8 +289,8 @@ The real corpus has landed. `evalhub-runs/` holds SWE-bench-Pro and
 NL2Repo-Bench trajectory bundles whose success label is the **benchmark
 verifier's reward**, not a DSM-AE gate — which is the whole requirement.
 `src/dsm_ae/harbor/` ingests them and `scripts/map_behaviour_to_task.py`
-scores twelve off-policy instruments against 1257 labelled SWE-bench-Pro
-trials (791 pass / 466 fail) across 11 repos and four ecosystems
+scores twelve off-policy instruments against 1260 labelled SWE-bench-Pro
+trials (791 pass / 469 fail) across 11 repos and four ecosystems
 (`reports/behaviour-task/MAPPING.md`).
 
 **Two corrections, because auditing the oracle changed the headline twice.**
@@ -334,27 +334,30 @@ after multiplicity correction; here is what survives each stage:
 
 | Instrument | Anchor | RD | RD* lang | RD** lang×diff | q |
 |---|---|---:|---:|---:|---:|
-| `test_suppression` (wrote skip/xfail) | EGD | +0.302 | +0.305 | **+0.239** | 0.011 |
-| `scope_creep` (>8 files edited) | OASD | +0.162 | +0.165 | +0.050 | 7.9e-05 |
-| `thrash_edit` (one file >4×) | ISDS | +0.122 | +0.120 | +0.047 | 7.9e-05 |
-| `read_loop` (one path >3×) | PCD | +0.109 | +0.113 | +0.039 | 0.0002 |
+| `premature_stop` (never edited) | PCD | +0.636 | +0.642 | **+0.761** | 1.4e-06 |
+| `test_suppression` (wrote skip/xfail) | EGD | +0.300 | +0.303 | **+0.239** | 0.011 |
+| `scope_creep` (>8 files edited) | OASD | +0.160 | +0.164 | +0.050 | 0.0001 |
+| `thrash_edit` (one file >4×) | ISDS | +0.119 | +0.117 | +0.045 | 0.0001 |
+| `read_loop` (one path >3×) | PCD | +0.105 | +0.109 | +0.037 | 0.0004 |
 
-**All three agency/control instruments survive the language control and then
-collapse under the difficulty control.** Reporting only `RD*` would have been
-the flattering result, and it would have been misleading.
+**The two short-trace instruments survive everything; all three
+agency/control instruments survive the language control and then collapse
+under the difficulty control.** Reporting only `RD*` would have been the
+flattering result, and it would have been misleading.
 
-`destructive_command` was in this table before the harness-failure exclusion
-and is no longer significant (q=0.058). It is named here rather than quietly
-dropped: cleaning the oracle cost a finding as well as confirming others,
-which is what an honest cleanup looks like.
+`premature_stop` — the agent ends the run without editing anything — is the
+strongest result in the table. All 16 cases failed the task, and the effect
+*strengthens* to +0.761 under joint stratification. It reached significance
+only after a late correction: the zero-test exclusion had been discarding
+pytest **collection errors**, where the agent's own patch breaks an import so
+the suite runs nothing. That zero is a real model failure, not an
+infrastructure artifact, and recovering those three trials moved
+`premature_stop` from `underpowered` (n=13) to q=1.4e-06 (n=16).
 
-`premature_stop` deserves a note: it has the largest effect in the table
-(RD +0.634, and it *strengthens* to +0.760 under joint stratification) and
-every one of its 13 cases failed. But 13 is below the threshold where a rate
-means much, so it is marked `underpowered` rather than promoted. Removing the
-zero-test artifacts cut its sample from 23 to 13 — a reminder that the
-artifacts were concentrated in exactly the degenerate runs most likely to look
-like a striking finding.
+`destructive_command` went the other way: it was significant before the
+harness-failure exclusion and is not now (q=0.058). Both directions are
+reported. A cleanup that only ever confirms the findings you already have is
+not a cleanup.
 
 The honest reading is that the difficulty column is a *stress test*, not a
 verdict, because trace length is **endogenous**: `thrash_edit` and `read_loop`
@@ -365,13 +368,13 @@ sprawl/thrash family we **cannot currently separate** "the behaviour hurt the
 task" from "the task was hard, which produced both the behaviour and the
 failure." That is an open question, not a finding in either direction.
 
-One result is not vulnerable to that objection. `test_suppression` is a
-*short*-trace behaviour — length adjustment cannot manufacture it — and it
-**strengthens** under joint stratification to +0.232 (q=0.011). An agent that
-silences a test instead of fixing it fails the job at a markedly higher rate
-within any ecosystem and any difficulty band. It fires on only 3.4% of
-failures: real, rare, and unambiguous. `premature_stop` points the same way
-even harder (+0.760) but at n=13 is not yet a rate worth quoting.
+Two results are not vulnerable to that objection. `premature_stop` and
+`test_suppression` are *short*-trace behaviours — length adjustment cannot
+manufacture them — and both **strengthen** under joint stratification, to
++0.761 (q=1.4e-06) and +0.239 (q=0.011). An agent that stops without editing
+anything, or that silences a test instead of fixing it, fails the job at a
+markedly higher rate within any ecosystem and any difficulty band. They fire
+on only 3.4% of failures each: real, rare, and unambiguous.
 
 `edited_test_files` fires on 84% of runs and predicts *nothing* (q=0.48). On
 SWE-bench-Pro, touching tests is usually part of a legitimate fix. That null is

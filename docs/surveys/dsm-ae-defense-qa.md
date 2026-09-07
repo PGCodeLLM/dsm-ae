@@ -430,15 +430,15 @@ These require new work. Do not paper over them in the blog.
    license analogy in a paper abstract.
    **PARTIALLY CLOSED 2026-09-06.** `src/dsm_ae/harbor/` +
    `scripts/map_behaviour_to_task.py` produce the first
-   behaviour→task mapping on an oracle we do not own: **1257**
-   labelled SWE-bench-Pro trials (791 pass / 466 fail), 11 repos,
+   behaviour→task mapping on an oracle we do not own: **1260**
+   labelled SWE-bench-Pro trials (791 pass / 469 fail), 11 repos,
    4 ecosystems, verifier reward as `y`
    (`reports/behaviour-task/MAPPING.md`). Robust to **both** language
    and difficulty stratification: `test_suppression` (EGD, RD**
    +0.232, q=0.011) — a short-trace behaviour, so length adjustment
    cannot manufacture it. Survive language but **collapse** under
-   difficulty: `scope_creep` (+0.165 → +0.050), `thrash_edit`
-   (+0.120 → +0.047), `read_loop` (+0.113 → +0.039).
+   difficulty: `scope_creep` (+0.164 → +0.050), `thrash_edit`
+   (+0.117 → +0.045), `read_loop` (+0.109 → +0.037).
    `destructive_command` fell below significance (q=0.058) once
    harness failures were excluded — the cleanup cost a finding as
    well as confirming others. `premature_stop` has the
@@ -764,3 +764,41 @@ defect that a reasonable person would not have predicted from the layer above.
 The general rule: **verify at the level of what was physically observed —
 exit codes, test counts, log bytes — not at the level of what some component
 concluded about it.**
+
+### Q21. Does "zero tests ran" always mean infrastructure?
+
+**No — and the first version of the exclusion was over-broad because of it.**
+
+A pytest **collection error** also produces an empty `tests` list: when the
+agent's own patch breaks an import, the suite runs nothing and reports
+`ERROR test_x.py`. That zero is a *genuine model failure*, and the original
+rule discarded it alongside true infrastructure cases.
+
+Splitting the reference-bundle zero-test population on whether the verifier
+stdout shows a collection/import error separates cleanly:
+
+| Language | has collection ERROR | no ERROR |
+|---|---:|---:|
+| python | 3 | 0 |
+| go | 0 | 52 |
+| typescript | 0 | 15 |
+
+Perfect separation, in the direction the mechanism predicts. The Go and
+TypeScript cases are the qemu/exec artifacts; every Python case is the agent
+breaking its own import.
+
+`HarborTrial.scoreable` now keeps collection errors in `y`. Recovering those 3
+trials moved **`premature_stop` from `underpowered` (n=13) to the strongest
+result in the table** — RD** +0.761, q=1.4e-06, with all 16 cases failing.
+
+Two lessons worth separating:
+
+1. **An exclusion rule needs its own falsification test.** "Zero tests ran"
+   was justified by a *mechanism* (broken exec path). The right check is
+   whether every excluded trial actually exhibits that mechanism — and 3 did
+   not. Had this gone unchecked, the effect would have been to quietly delete
+   real Python failures while retaining Go infrastructure noise elsewhere.
+2. **Over-exclusion is not the safe direction.** The intuition that dropping
+   ambiguous trials is conservative is wrong: it cost a genuine finding here.
+   Q18 rejected an exclusion that was too broad; Q21 narrows one that had
+   already shipped. Both corrections run against the same instinct.

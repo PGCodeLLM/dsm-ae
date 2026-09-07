@@ -29,6 +29,13 @@ from typing import Any, Iterator
 # Repo -> primary language. SWE-bench-Pro spans several ecosystems; language is
 # the main confound to stratify on when asking "is this an agentic deficit or
 # just weak C++/Go training?".
+# A suite that failed to *collect* (an import error caused by the agent's own
+# patch) rather than one that never ran at all. See HarborTrial.scoreable.
+_COLLECT_ERR_RE = re.compile(
+    r"^ERROR \S+\.py|\berror in [0-9.]+s|ImportError|ModuleNotFoundError|SyntaxError",
+    re.M,
+)
+
 REPO_LANG: dict[str, str] = {
     "ansible": "python",
     "qutebrowser": "python",
@@ -56,6 +63,7 @@ class HarborTrial:
     language: str
     reward: float | None
     n_tests_run: int | None = None  # None = verifier output absent/unparsed
+    collection_error: bool = False  # suite failed to import -> real model failure
     exception_type: str | None = None  # harness-level failure from result.json
     tool_calls: list[dict[str, Any]] = field(default_factory=list)
     reasoning: list[str] = field(default_factory=list)
@@ -71,13 +79,19 @@ class HarborTrial:
 
         Two ways it is not:
 
-        1. **The verifier ran zero tests.** An empty `tests` list in
-           `verifier/output.json` means the trial was scored 0 without any test
-           executing — a broken exec path, not a model failure. Counting those
-           as failures inflates the failure rate of whichever ecosystem is
-           affected (here Go: 20.8% of Go trials vs 1.1% of Python), which
-           would manufacture exactly the language-deficit conclusion this study
-           exists to rule out.
+        1. **The verifier ran zero tests** *and the suite did not fail to
+           collect*. An empty `tests` list in `verifier/output.json` normally
+           means a broken exec path, not a model failure, and counting those as
+           failures inflates the affected ecosystem's failure rate (here Go:
+           20.8% of Go trials vs 1.1% of Python) — manufacturing exactly the
+           language-deficit conclusion this study exists to rule out.
+
+           The exception is a **collection error**: when the agent's own patch
+           breaks an import, pytest reports `ERROR test_x.py` and runs nothing.
+           That zero is a genuine model failure and stays in `y`. Splitting on
+           this keeps 3 real Python failures that the earlier rule discarded,
+           while still dropping the 108 Go / 31 TypeScript infra cases, none of
+           which show a collection error.
         2. **The harness itself failed.** `result.json.exception_info` records
            trial-level failures — `NetworkConnectionError`, `AgentTimeoutError`,
            `NonZeroAgentExitCodeError`, `UnknownApiError`,
@@ -94,7 +108,8 @@ class HarborTrial:
         Trials with no `output.json` at all stay scoreable; absence of the file
         is not evidence that nothing ran.
         """
-        return self.n_tests_run != 0 and self.exception_type is None
+        ran_nothing = self.n_tests_run == 0 and not self.collection_error
+        return not ran_nothing and self.exception_type is None
 
     @property
     def success(self) -> bool | None:
@@ -212,6 +227,22 @@ def load_trial(inst_dir: Path, *, run: str) -> HarborTrial | None:
         if isinstance(vd, dict) and isinstance(vd.get("tests"), list):
             n_tests_run = len(vd["tests"])
 
+    # A run that executed no tests is normally an infrastructure artifact — but
+    # not when the suite failed to *collect*. A pytest collection error means
+    # the agent's own patch broke an import, which is a genuine model failure
+    # and must stay in `y`. Without this, ~3 real Python failures were being
+    # discarded alongside the 108 Go / 31 TypeScript infra cases.
+    collection_error = False
+    if n_tests_run == 0:
+        so = inst_dir / "verifier" / "run-script-stdout.txt"
+        if so.exists():
+            try:
+                collection_error = bool(
+                    _COLLECT_ERR_RE.search(so.read_text(errors="ignore"))
+                )
+            except OSError:
+                collection_error = False
+
     trial_name = str(result.get("trial_name") or inst_dir.name)
     task_name = str(result.get("task_name") or "")
     source = str(result.get("source") or "").strip()
@@ -264,6 +295,7 @@ def load_trial(inst_dir: Path, *, run: str) -> HarborTrial | None:
         language=REPO_LANG.get(repo, "python" if source.startswith("nl2repo") else "unknown"),
         reward=reward,
         n_tests_run=n_tests_run,
+        collection_error=collection_error,
         exception_type=exception_type,
         tool_calls=calls,
         reasoning=reasoning,
