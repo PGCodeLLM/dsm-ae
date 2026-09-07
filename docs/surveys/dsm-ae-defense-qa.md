@@ -802,3 +802,39 @@ Two lessons worth separating:
    ambiguous trials is conservative is wrong: it cost a genuine finding here.
    Q18 rejected an exclusion that was too broad; Q21 narrows one that had
    already shipped. Both corrections run against the same instinct.
+
+### Q22. Found in the wild: a behaviour with zero task-outcome signal
+
+An agent on `internetarchive/openlibrary` dumped a compiled binary into its
+own transcript — `opencode.txt` reached **199,405,070 bytes** at ~25MB/min,
+33% non-printable x86 machine code. It then **solved the task: `reward=1`.**
+
+This is the cleanest in-the-wild example we have of why the task layer alone
+is insufficient, and it cuts *against* a naive reading of the framework:
+
+- **A task-success metric records this as a clean success.** SWE-bench-Pro's
+  verifier is indifferent to how the agent spent its context.
+- **The behaviour is nonetheless real and costly** — self-inflicted context
+  destruction and a large token burn, the kind of thing that would matter to
+  anyone paying for the run or relying on the agent to stay coherent over a
+  longer horizon.
+
+So the honest lesson is not "behaviours predict failure" — this one demonstrably
+did not. It is that **behaviour and outcome are separate axes**, and a
+diagnostic frame earns its keep precisely where they diverge. `P(fail | B)` is
+the right question for triage; it is the wrong question for cost, context
+hygiene, and anything measured over a horizon longer than one task.
+
+**Instrument-design consequence, and a real limitation.** This behaviour is
+**undetectable by every instrument currently in the battery.** All twelve
+off-policy instruments read `agent/trajectory.json`, and the trajectory here is
+a well-formed 108KB / 15-step ATIF record — the dump exists only in the raw
+`opencode.txt` stream. The trial ingests normally and looks unremarkable.
+
+Detecting it requires a different input path than anything wired today:
+non-printable ratio over a bounded tail of the raw stream, or per-step
+observation growth far above the session median. Neither is implemented. Noted
+as a gap rather than quietly added, because it is a reminder that **the
+instrument set is bounded by what the trajectory format happens to record** —
+a limitation that applies to any bring-your-own-task user reading the same
+file.
