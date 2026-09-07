@@ -383,18 +383,26 @@ def render_markdown(
 
     if excluded:
         total_ex = sum(excluded.values())
-        out.append("\n## Excluded: trials where the verifier ran zero tests\n")
+        out.append("\n## Excluded: trials whose reward did not measure the model\n")
         out.append(
-            f"\n{total_ex} trials carried a reward but an empty `tests` list in\n"
-            "`verifier/output.json` — scored 0 without a single test executing.\n"
-            "That is a broken harness/exec path, not a model failure, so these are\n"
-            "dropped rather than counted as failures.\n"
-            "\nThis matters because the artifact is **not** evenly distributed. Left\n"
-            "in, it inflates the failure rate of whichever ecosystem it hits and\n"
-            "manufactures precisely the language-deficit conclusion this study\n"
-            "exists to rule out.\n"
+            f"\n{total_ex} trials carried a reward that is not a measurement of\n"
+            "model behaviour, for one of two **structural** reasons:\n"
+            "\n1. **Zero tests ran** — an empty `tests` list in\n"
+            "   `verifier/output.json`: scored 0 without a single test executing.\n"
+            "2. **The harness failed** — `result.json.exception_info` records a\n"
+            "   trial-level failure (network, agent timeout, non-zero agent exit,\n"
+            "   API/auth error). These are invisible in `trial.log`, which is why\n"
+            "   an earlier pass reported \"zero errors\" while 119 reference trials\n"
+            "   carried one.\n"
+            "\nBoth mean the record shows the measurement *could not have happened*.\n"
+            "A reward that merely disagrees with a partial success signal is **not**\n"
+            "excluded — that case was adjudicated and rejected (defense Q/A Q18).\n"
+            "\nThis matters because neither artifact is evenly distributed. Left in,\n"
+            "they inflate the failure rate of whichever ecosystem they hit and\n"
+            "manufacture precisely the language-deficit conclusion this study exists\n"
+            "to rule out.\n"
         )
-        out.append("\n| Language | excluded |\n|---|---:|\n")
+        out.append("\n| Language — reason | excluded |\n|---|---:|\n")
         for lang, n in sorted(excluded.items(), key=lambda kv: -kv[1]):
             out.append(f"| {lang} | {n} |\n")
 
@@ -449,7 +457,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         langs: dict[str, Counter] = defaultdict(Counter)
         for t in trials:
             if t.reward is not None and not t.scoreable:
-                excluded[t.language] += 1
+                reason = (
+                    "zero tests ran"
+                    if t.n_tests_run == 0
+                    else f"harness: {t.exception_type}"
+                )
+                excluded[f"{t.language} — {reason}"] += 1
             if t.success is None:
                 continue
             langs[t.language]["pass" if t.success else "fail"] += 1
@@ -457,10 +470,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         for t in trials:
             by_source[t.source].append(t)
         n_ex = sum(1 for t in trials if t.reward is not None and not t.scoreable)
-        print(f"loaded {run_name}: {len(trials)} trials ({n_ex} excluded: zero tests ran)")
+        print(f"loaded {run_name}: {len(trials)} trials ({n_ex} unscoreable)")
 
     if excluded:
-        print("excluded zero-test trials by language:", dict(excluded))
+        print("excluded (reward did not measure the model):")
+        for k, v in sorted(excluded.items(), key=lambda kv: -kv[1]):
+            print(f"   {v:5d}  {k}")
 
     blocks: list[tuple[str, int, int, list[Association]]] = []
     payload: dict[str, object] = {"sources": {}}

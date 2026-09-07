@@ -38,13 +38,14 @@ metrics at *your* Harbor task trajectories and you get a behaviour×task weight
 matrix for *your* task family. The packs are the closed-course elicitation;
 your real tasks are the on-road exam.
 
-The first real mapping is in: on 1271 SWE-bench-Pro trials scored against the
+The first real mapping is in: on 1257 SWE-bench-Pro trials scored against the
 benchmark's own verifier, silencing a test predicts failure robustly across
 every ecosystem and difficulty band. The sprawl-and-thrash family predicts
 failure too — but cannot yet be separated from task difficulty, and we say so.
-Auditing the oracle also caught 139 trials scored `0` while running zero
-tests, mostly Go; excluding them cut the apparent language gap from 17 points
-to 5 (§3.4).
+Auditing the oracle mattered more than building it: two rounds of exclusion
+(trials scored `0` with zero tests run, and trials whose harness died
+invisibly to `trial.log`) cut the apparent language gap from 17 points to 5,
+and cost one finding along the way (§3.4).
 
 ---
 
@@ -288,21 +289,33 @@ The real corpus has landed. `evalhub-runs/` holds SWE-bench-Pro and
 NL2Repo-Bench trajectory bundles whose success label is the **benchmark
 verifier's reward**, not a DSM-AE gate — which is the whole requirement.
 `src/dsm_ae/harbor/` ingests them and `scripts/map_behaviour_to_task.py`
-scores twelve off-policy instruments against 1271 labelled SWE-bench-Pro
-trials (798 pass / 473 fail) across 11 repos and four ecosystems
+scores twelve off-policy instruments against 1257 labelled SWE-bench-Pro
+trials (791 pass / 466 fail) across 11 repos and four ecosystems
 (`reports/behaviour-task/MAPPING.md`).
 
-**One correction, because it changes the headline.** An initial pass used
-1410 trials and reported a large language gap. Auditing the verifier output
-showed that 139 of those trials were scored `0` while running **zero tests** —
-an empty `tests` list in `verifier/output.json`, i.e. a broken exec path in the
-grading harness, not a model failure. The artifact is badly skewed: 102 Go,
-31 TypeScript, 6 Python. Left in, it inflated Go's failure rate from 41.1% to
-53.4% and would have manufactured exactly the "this model is weak at Go"
-conclusion the study exists to rule out. Those trials are now dropped by
-`HarborTrial.scoreable` and itemized in the report. The real language spread
-is much narrower than first reported — Go 41.1% vs Python 36.1%, a 5-point
-gap, not 17.
+**Two corrections, because auditing the oracle changed the headline twice.**
+
+An initial pass used 1410 trials and reported a large language gap. Auditing
+the verifier output showed 139 of those were scored `0` while running **zero
+tests** — an empty `tests` list in `verifier/output.json`, i.e. a broken exec
+path, not a model failure. Badly skewed: 102 Go, 31 TypeScript, 6 Python. Left
+in, it inflated Go's failure rate from 41.1% to 53.4% and would have
+manufactured exactly the "weak at Go" conclusion the study exists to rule out.
+
+A second pass caught more. Harbor records trial-level failures in
+`result.json.exception_info`, **not** in `trial.log` — so a trial can die of a
+network error, agent timeout, non-zero agent exit, or auth failure while the
+log looks healthy. 119 reference trials carried one, and 108 still had a
+reward the mapping was treating as a model outcome. Health checks that grepped
+`trial.log` had been reporting "zero errors" the whole time.
+
+Both are now excluded by `HarborTrial.scoreable` and itemized by cause in the
+report. The exclusion rule is deliberately narrow: drop a trial only when the
+record shows the measurement **could not have happened** — nothing executed,
+or the harness died. A reward that merely disagrees with a partial success
+signal stays in, a case that was adjudicated and rejected (see §6). The real
+language spread is far narrower than first reported: Go 41.1% vs Python 36.1%,
+a 5-point gap, not 17.
 
 Off-policy means the instruments make no reference to a toy fixture. `2+2=5`
 cannot transfer; *"patched a file whose contents were never read"* transfers to
@@ -321,15 +334,19 @@ after multiplicity correction; here is what survives each stage:
 
 | Instrument | Anchor | RD | RD* lang | RD** lang×diff | q |
 |---|---|---:|---:|---:|---:|
-| `test_suppression` (wrote skip/xfail) | EGD | +0.300 | +0.303 | **+0.232** | 0.011 |
-| `scope_creep` (>8 files edited) | OASD | +0.176 | +0.181 | +0.066 | 1.7e-05 |
-| `thrash_edit` (one file >4×) | ISDS | +0.124 | +0.122 | +0.046 | 3.6e-05 |
-| `read_loop` (one path >3×) | PCD | +0.113 | +0.117 | +0.039 | 0.0001 |
-| `destructive_command` | OASD | +0.104 | +0.111 | +0.046 | 0.032 |
+| `test_suppression` (wrote skip/xfail) | EGD | +0.302 | +0.305 | **+0.239** | 0.011 |
+| `scope_creep` (>8 files edited) | OASD | +0.162 | +0.165 | +0.050 | 7.9e-05 |
+| `thrash_edit` (one file >4×) | ISDS | +0.122 | +0.120 | +0.047 | 7.9e-05 |
+| `read_loop` (one path >3×) | PCD | +0.109 | +0.113 | +0.039 | 0.0002 |
 
-**All four agency/control instruments survive the language control and then
+**All three agency/control instruments survive the language control and then
 collapse under the difficulty control.** Reporting only `RD*` would have been
 the flattering result, and it would have been misleading.
+
+`destructive_command` was in this table before the harness-failure exclusion
+and is no longer significant (q=0.058). It is named here rather than quietly
+dropped: cleaning the oracle cost a finding as well as confirming others,
+which is what an honest cleanup looks like.
 
 `premature_stop` deserves a note: it has the largest effect in the table
 (RD +0.634, and it *strengthens* to +0.760 under joint stratification) and

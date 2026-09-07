@@ -430,16 +430,18 @@ These require new work. Do not paper over them in the blog.
    license analogy in a paper abstract.
    **PARTIALLY CLOSED 2026-09-06.** `src/dsm_ae/harbor/` +
    `scripts/map_behaviour_to_task.py` produce the first
-   behaviour→task mapping on an oracle we do not own: **1271**
-   labelled SWE-bench-Pro trials (798 pass / 473 fail), 11 repos,
+   behaviour→task mapping on an oracle we do not own: **1257**
+   labelled SWE-bench-Pro trials (791 pass / 466 fail), 11 repos,
    4 ecosystems, verifier reward as `y`
    (`reports/behaviour-task/MAPPING.md`). Robust to **both** language
    and difficulty stratification: `test_suppression` (EGD, RD**
    +0.232, q=0.011) — a short-trace behaviour, so length adjustment
    cannot manufacture it. Survive language but **collapse** under
-   difficulty: `scope_creep` (+0.181 → +0.066), `thrash_edit`
-   (+0.122 → +0.046), `read_loop` (+0.117 → +0.039),
-   `destructive_command` (+0.111 → +0.046). `premature_stop` has the
+   difficulty: `scope_creep` (+0.165 → +0.050), `thrash_edit`
+   (+0.120 → +0.047), `read_loop` (+0.113 → +0.039).
+   `destructive_command` fell below significance (q=0.058) once
+   harness failures were excluded — the cleanup cost a finding as
+   well as confirming others. `premature_stop` has the
    largest effect (RD** +0.760) but n=13 → `underpowered`, not
    promoted.
    **An earlier revision of this entry cited 1410 trials and a
@@ -684,3 +686,42 @@ shows the measurement *could not have happened* (nothing executed), never
 because the reward disagrees with a partial success signal. When an exclusion
 would move a result in the direction you already expect, that is a reason for
 more adjudication, not less.
+
+### Q19. Your health checks said "zero errors" for hours. Were they checking the right thing?
+
+**No. They grepped the wrong file, and it hid a second contamination layer.**
+
+Harbor records trial-level failures in **`result.json.exception_info`**, not in
+`trial.log`. A trial can die of `NetworkConnectionError`, `AgentTimeoutError`,
+`NonZeroAgentExitCodeError`, `UnknownApiError`, `AgentAuthenticationError`, or
+`VerifierTimeoutError` while `trial.log` reads perfectly healthy. Every
+"0 errors" status report in this work was checking a file that structurally
+could not contain the failures.
+
+In the reference bundles: **119 trials carry `exception_info`, and 108 of them
+still had a reward** the mapping was consuming as a model outcome. 94 were
+scored as *failures* — infrastructure attributed to the model.
+
+Fixed in `HarborTrial.scoreable`, which now excludes on either structural
+disqualification (zero tests ran, or harness exception) and itemizes by cause
+in `MAPPING.md`.
+
+**What it cost, stated plainly:** `destructive_command` (OASD) fell from
+q=0.032 to q=0.058 and is no longer significant. The same cleanup that
+strengthened confidence in the surviving instruments removed one. A cleanup
+that only ever confirms your prior findings is not a cleanup.
+
+**The generalizable point, and why this is Q19 and not a footnote:** Q17
+established that an external oracle removes circularity but not measurement
+error. Q19 sharpens it — *you cannot audit an oracle by reading the log it
+writes for humans*. The authoritative failure record was in a machine-readable
+field nobody was reading. Anyone bringing their own Harbor task should check
+`exception_info` before trusting any reward, pass or fail.
+
+**Live-run corollary (DGX, 2026-09-07):** the same blind spot inflated live
+triage. Reading `result.json` reclassified the picture to 18 quarantined vs 9
+trustworthy, where an earlier per-language mean had silently included setup
+failures in its denominator. Two live root causes were only visible this way:
+apt 404s on EOL Debian images (fixed), and HTTP 429 credential cooldowns from
+the upstream provider (~2.4h resets, three firing in the same minute from
+concurrent agents — a thundering herd, not our rpm setting).

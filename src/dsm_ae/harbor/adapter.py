@@ -56,6 +56,7 @@ class HarborTrial:
     language: str
     reward: float | None
     n_tests_run: int | None = None  # None = verifier output absent/unparsed
+    exception_type: str | None = None  # harness-level failure from result.json
     tool_calls: list[dict[str, Any]] = field(default_factory=list)
     reasoning: list[str] = field(default_factory=list)
     messages: list[str] = field(default_factory=list)
@@ -66,18 +67,34 @@ class HarborTrial:
 
     @property
     def scoreable(self) -> bool:
-        """False when the verifier ran zero tests, so the reward measured nothing.
+        """Whether this trial's reward is a measurement of the *model*.
 
-        A trial whose `verifier/output.json` carries an empty `tests` list was
-        scored 0 without any test executing — a broken harness/exec path, not a
-        model failure. Counting those as failures inflates the failure rate of
-        whichever ecosystem happens to be affected (in these bundles, Go: 20.8%
-        of Go trials vs 1.1% of Python), which would manufacture exactly the
-        language-deficit conclusion this study exists to rule out. Trials with
-        no `output.json` at all are left scoreable — absence of the file is not
-        evidence that nothing ran.
+        Two ways it is not:
+
+        1. **The verifier ran zero tests.** An empty `tests` list in
+           `verifier/output.json` means the trial was scored 0 without any test
+           executing — a broken exec path, not a model failure. Counting those
+           as failures inflates the failure rate of whichever ecosystem is
+           affected (here Go: 20.8% of Go trials vs 1.1% of Python), which
+           would manufacture exactly the language-deficit conclusion this study
+           exists to rule out.
+        2. **The harness itself failed.** `result.json.exception_info` records
+           trial-level failures — `NetworkConnectionError`, `AgentTimeoutError`,
+           `NonZeroAgentExitCodeError`, `UnknownApiError`,
+           `AgentAuthenticationError`, `VerifierTimeoutError`. These are
+           infrastructure, not behaviour, and they are invisible in `trial.log`,
+           which is why an earlier pass reported "zero errors" while 119
+           reference trials carried one.
+
+        Note both are *structural* disqualifications: the record shows the
+        measurement could not have happened. A reward that merely disagrees
+        with a partial success signal is NOT excluded — see the defense Q/A
+        (Q18) for the case that was adjudicated and rejected.
+
+        Trials with no `output.json` at all stay scoreable; absence of the file
+        is not evidence that nothing ran.
         """
-        return self.n_tests_run != 0
+        return self.n_tests_run != 0 and self.exception_type is None
 
     @property
     def success(self) -> bool | None:
@@ -173,6 +190,18 @@ def load_trial(inst_dir: Path, *, run: str) -> HarborTrial | None:
 
     # How many tests the verifier actually executed. Zero means the reward is
     # not a measurement of the model — see HarborTrial.scoreable.
+    # Harness-level failure. Recorded in result.json, NOT in trial.log — a
+    # trial can fail here while trial.log looks perfectly healthy.
+    exception_type: str | None = None
+    einfo = result.get("exception_info")
+    if einfo:
+        if isinstance(einfo, dict):
+            exception_type = str(
+                einfo.get("exception_type") or einfo.get("type") or "unknown"
+            )
+        else:
+            exception_type = str(einfo)[:80]
+
     n_tests_run: int | None = None
     vo = inst_dir / "verifier" / "output.json"
     if vo.exists():
@@ -235,6 +264,7 @@ def load_trial(inst_dir: Path, *, run: str) -> HarborTrial | None:
         language=REPO_LANG.get(repo, "python" if source.startswith("nl2repo") else "unknown"),
         reward=reward,
         n_tests_run=n_tests_run,
+        exception_type=exception_type,
         tool_calls=calls,
         reasoning=reasoning,
         messages=messages,
