@@ -339,3 +339,36 @@ suite passes but scores 0 because the expected test name embeds an assertion
 count that shifts with the code. The reference harness does not show this.
 Unlike "zero tests ran", "passed but mis-scored" has no clean structural
 signature, so it is detected but not auto-excluded.
+
+### Commit-attribution note (2026-09-07)
+
+`scripts/dgx/build_nl2repo_tasks.py`, `triage_rewards.py`, and parts of this
+README were authored by the NL2Repo-repair and triage workstreams but were
+swept into commits `a107e6f` ("fix(task-layer): exclude trials where the
+verifier ran zero tests") and `a208107` ("docs(dgx): record no-Go decision")
+by a `git add -A scripts/dgx/` in a concurrent workstream. Those commit
+messages do **not** describe the apt/Node repair or the triage classifier.
+The content landed intact and is verified; history is left unrewritten
+because the commits are already the shared base for later work. This note is
+the correction of record.
+
+### Problem 14: model-side 429 credential cooldown (not an environment bug)
+
+Four trials died in opencode's **run** phase (not setup) with a ~1KB
+`agent/opencode.txt` containing a single event: `All credentials for model
+gpt-5.6-{terra,luna} are cooling down via provider codex`, HTTP 429,
+`reset_seconds` ~7800-8800. Affected: `mechanicalsoup__qvyiCUS`,
+`instance_tutao__tutanota-5181821__DD4qHmQ`,
+`instance_gravitational__teleport__{bq6dyKb,iZwFoLH}`.
+
+Scope check: **15 of 18** trials show cooldown text at least once, but only
+those 4 died of it — the rest retried through. Live trials were confirmed
+still streaming (opencode.txt at 100KB/43KB, updated within the minute), so
+the cooldown is transient backpressure, not an outage. Nothing to fix in
+code; these need re-running when the credential pool is warm.
+
+Note for trajectory analysis: the two `gravitational` trials and the `tutao`
+one have `reward.txt=0` but **no `trajectory.json`**, so they are useless for
+behaviour scoring even though they look scoreable by reward alone. Any
+re-run intended to feed `map_behaviour_to_task.py` must produce a trajectory,
+not just a reward.
