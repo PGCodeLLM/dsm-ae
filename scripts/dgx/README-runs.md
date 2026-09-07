@@ -436,3 +436,121 @@ grants the instance another attempt.
 **Check to run before trusting a drain gate:** cross-reference container
 liveness against agent-log growth, not container status. A container in
 `docker ps` is not proof a trial is alive.
+
+## 11. IMPORTANT: exceptions live in result.json, not trial.log
+
+A third failure class was missed for several hours because I was grepping
+`trial.log`. **Harbor records trial-level failures in
+`result.json -> exception_info`**, and a trial can fail there while `trial.log`
+looks unremarkable. Any health check that greps only `trial.log` will silently
+under-report failures. `triage_rewards.py` now reads `result.json`.
+
+Census once that was fixed (34 trials so far):
+
+```
+ARTIFACT_APT_404                8   agent's install step 404s -> agent never runs
+GENUINE_PASS                    8
+INCOMPLETE                      6   still running
+ARTIFACT_AGENT_SETUP_FAILED     4   other non-zero exit during setup
+ARTIFACT_RuntimeError           2   the more-Itertools image-casing bug (fixed)
+ARTIFACT_NO_TESTS_RAN           2   Go / qemu
+ARTIFACT_AGENT_TIMEOUT          1   the 100-min stall, reaped as predicted
+GENUINE_FAIL                    1
+ARTIFACT_GRADER_NAME_MISMATCH   1
+```
+
+**18 quarantined vs 9 trustworthy.** Earlier per-language means in this file
+were computed before APT_404/setup failures were detected and were therefore
+too optimistic in their denominators; the current script supersedes them.
+
+### Artifact C -- apt 404 on Debian 11 images (FIXABLE)
+
+`opencode`'s setup runs `apt-get update && apt-get install -y curl bash
+coreutils nodejs npm`. Several NL2Repo images are **Debian 11 (bullseye)**,
+which is EOL and has moved to `archive.debian.org`, so the install dies with
+`404 Not Found` and exit 100 -- **before the agent makes a single model call**.
+
+Affected so far: deepdiff, flask-restful, graphneuralnetwork, pyperclip
+(4 instances x 2 models = 8 trials).
+
+Fix under test (tmux `apttest`): rewrite sources to `archive.debian.org` and
+disable Valid-Until checking, in the task Dockerfile so it applies before the
+agent's setup step:
+
+```dockerfile
+RUN sed -i -e 's|deb.debian.org/debian-security|archive.debian.org/debian-security|g' \
+           -e 's|security.debian.org/debian-security|archive.debian.org/debian-security|g' \
+           -e 's|deb.debian.org/debian|archive.debian.org/debian|g' /etc/apt/sources.list \
+ && printf 'Acquire::Check-Valid-Until "false";\n' > /etc/apt/apt.conf.d/99no-check-valid
+```
+
+Unlike the Go problem this is a genuine environment fix, not a workaround that
+changes what is measured: it only lets the agent's own install step succeed.
+
+### Artifact D -- upstream model quota exhaustion (429 cooling down)
+
+Four trials died with opencode exiting 1 after the endpoint returned **HTTP
+429**:
+
+```
+"All credentials for model gpt-5.6-terra are cooling down via provider codex"
+reset_seconds: 8776   (~2h26m)
+```
+
+This is **not** our rpm setting and not something a retry solves quickly -- it
+is the upstream provider behind the gateway exhausting its credentials, with a
+multi-hour cooldown. Three of the four fired at the *same minute* (00:03), i.e.
+a thundering herd from 8 concurrent agents starting work together.
+
+Both models responded 200 again on a later manual probe, so the cooldown
+clears -- but any trial in flight when it hits is lost, and it will recur.
+
+**Recommendation:** lower `n_concurrent_trials` from 2 to 1 in each of the four
+configs (4 agents in flight instead of 8). Wall-clock cost is modest because
+emulation, not the model, is usually the bottleneck; the benefit is fewer
+trials destroyed by a cooldown that wastes the agent time already spent. Also
+consider staggering job starts by a few minutes rather than launching all four
+at once.
+
+Note `--max-retries 1` does retry these, but a retry that starts inside a
+2.4-hour cooldown just fails again, so retries are not a real mitigation here.
+
+
+### Apt fix: VERIFIED by outcome (2026-09-07 02:23)
+
+The `archive.debian.org` + pinned-Node repair is confirmed working, not merely
+"built without error". In `runs-fixup`:
+
+```
+flask-restful__6KAohgZ = 1.000000
+flask-restful__VDLzPdk = 1.000000
+flask-restful__3gjirmY = 0.000000   (nop-agent control, correctly 0)
+```
+
+`flask-restful` is a Debian 10 buster image and was one of the 8 instances
+that previously died at agent setup with apt 404s before making a single model
+call. Two real agent trials now reach the verifier and **solve the task**.
+That is outcome-level proof: the environment fix restored measurability
+without changing what is being measured.
+
+Diagnosis was independently corroborated two ways: the image's `sources.list`
+points at `deb.debian.org` for `bullseye`/`bullseye-security` (EOL, archived),
+and the 8 failures are spread across ~2.5h (23:21 → 01:35) rather than
+clustered — systematic, not a transient mirror outage.
+
+### Concurrency lowered 2 -> 1 (2026-09-07 02:19)
+
+Applied to all 7 configs. 12 trials had died with `NonZeroAgentExitCodeError`,
+predominantly HTTP 429 `credentials cooling down via provider codex` with
+~2.4h resets — three firing in the same minute from 8 concurrent agents. That
+is upstream provider capacity, **not** our `rpm: 6` setting, so the fix is
+fewer simultaneous agents rather than slower request pacing.
+
+Deliberately not applied by restarting: running jobs keep their old value
+until the `nogo-switch` relaunch picks up the new configs, so no in-flight
+trial is killed to apply a throughput tweak.
+
+**Label precision matters here.** These 429 deaths occur *mid-run*, not during
+setup, and were initially mislabelled `ARTIFACT_AGENT_SETUP_FAILED`. They are
+now `ARTIFACT_MODEL_QUOTA_429`. The two route to different owners: apt 404 is
+ours to fix, quota exhaustion is the gateway's capacity.
