@@ -643,3 +643,44 @@ that shifts with the code (observed on `tutao`). That inflates
 TypeScript failures specifically. It is detected but not yet excluded,
 because "passed but mis-scored" has no clean structural signature the
 way "zero tests ran" does.
+
+### Q18. You excluded zero-test trials. Did you also check "passed but scored 0"?
+
+**Yes, and the check refuted the exclusion — which is why it was not made.**
+
+A second candidate artifact was reported from the DGX: a `tutao` trial whose
+tests **PASSED** but scored 0 because the expected test name embeds an
+assertion count that shifts with the code (`api tests (882 assertions)` vs
+`(223 assertions)`). That one is real and confirmed by direct inspection.
+
+The tempting generalization was to exclude every trial where
+`output.json` shows all-PASSED yet `reward=0`. In the reference bundles that
+is **153 trials** (78 go, 70 typescript, 5 python) — larger than the
+zero-test artifact, and skewed the same way, so it looked like the same bug.
+
+Adjudicating it against `verifier/run-script-stdout.txt` shows it is **not**:
+
+- 43 carry explicit failure text (`Test failed`, `Unknown test location`,
+  Karma `ERROR [`).
+- Of the 30 with no match for that pattern, hand-inspection found real
+  failures the regex simply missed — a pytest collection `ERROR` on top of
+  `47 passed`, a Go `FAIL` after `no tests to run`, a truncated run.
+- Only **2** carry the assertion-count signature.
+
+The explanation is that `output.json` is an **incomplete record**: it lists
+tests that passed, not the full run outcome. All-PASSED there does not mean
+the suite passed. Median `n_tests` for these is 9 vs 15 for rewarded trials —
+partial suites, correctly scored 0.
+
+**Had this been excluded, ~151 legitimate failures would have been deleted
+from `y`, and disproportionately from Go and TypeScript** — the same
+direction as the first artifact, which would have made the resulting
+"cleanup" look like a confirmation of the earlier fix. The two artifacts are
+distinguished by a structural fact, not by which one gives a nicer table:
+"zero tests ran" is unambiguous, "some tests passed" is not.
+
+**Standing rule this establishes:** exclude a trial only when the record
+shows the measurement *could not have happened* (nothing executed), never
+because the reward disagrees with a partial success signal. When an exclusion
+would move a result in the direction you already expect, that is a reason for
+more adjudication, not less.
