@@ -473,16 +473,30 @@ which is EOL and has moved to `archive.debian.org`, so the install dies with
 Affected so far: deepdiff, flask-restful, graphneuralnetwork, pyperclip
 (4 instances x 2 models = 8 trials).
 
-Fix under test (tmux `apttest`): rewrite sources to `archive.debian.org` and
-disable Valid-Until checking, in the task Dockerfile so it applies before the
-agent's setup step:
+**First attempted fix FAILED** (recorded so it is not retried): rewriting all
+three sources to `archive.debian.org` still exits 100, because
+`archive.debian.org` does **not** carry a `debian-security` suite for bullseye:
+
+```
+Ign:2 http://archive.debian.org/debian-security bullseye-security InRelease
+E: The repository 'http://archive.debian.org/debian-security bullseye-security
+   Release' does not have a Release file.
+```
+
+Fix v2 under test (tmux `apttest3`): point the main suites at the archive **and
+delete the security lines**, which no longer exist anywhere for an EOL release:
 
 ```dockerfile
-RUN sed -i -e 's|deb.debian.org/debian-security|archive.debian.org/debian-security|g' \
-           -e 's|security.debian.org/debian-security|archive.debian.org/debian-security|g' \
+RUN sed -i -e '/debian-security/d' -e '/security.debian.org/d' \
            -e 's|deb.debian.org/debian|archive.debian.org/debian|g' /etc/apt/sources.list \
  && printf 'Acquire::Check-Valid-Until "false";\n' > /etc/apt/apt.conf.d/99no-check-valid
 ```
+
+Note on method: the *first* version of this test reported `exit=0` for the
+"before" case -- it never reproduced the bug, because `>/dev/null 2>&1`
+swallowed the real exit status. A test that cannot reproduce the failure cannot
+validate the fix. The corrected test reproduces it (`exit=100`, 9 x 404) and is
+what these results come from.
 
 Unlike the Go problem this is a genuine environment fix, not a workaround that
 changes what is measured: it only lets the agent's own install step succeed.
@@ -505,12 +519,16 @@ a thundering herd from 8 concurrent agents starting work together.
 Both models responded 200 again on a later manual probe, so the cooldown
 clears -- but any trial in flight when it hits is lost, and it will recur.
 
-**Recommendation:** lower `n_concurrent_trials` from 2 to 1 in each of the four
-configs (4 agents in flight instead of 8). Wall-clock cost is modest because
-emulation, not the model, is usually the bottleneck; the benefit is fewer
-trials destroyed by a cooldown that wastes the agent time already spent. Also
-consider staggering job starts by a few minutes rather than launching all four
-at once.
+**Update -- this was a startup burst, not an ongoing bleed.** The count has
+stayed at 4 with **zero new 429s in the following hour**, and the endpoint
+probes 200. All four hit within ~16 minutes of the jobs starting, when 8 agents
+began work simultaneously; once trials desynchronised the pressure disappeared.
+
+So lowering concurrency is **optional, not urgent**. If you want to reduce the
+risk of losing trials to a future cooldown, drop `n_concurrent_trials` 2 -> 1
+(4 agents instead of 8) and stagger job starts -- wall-clock cost is modest
+since emulation is usually the bottleneck. But restarting the running jobs to
+achieve this would cost more than it saves right now.
 
 Note `--max-retries 1` does retry these, but a retry that starts inside a
 2.4-hour cooldown just fails again, so retries are not a real mitigation here.
@@ -554,3 +572,47 @@ trial is killed to apply a throughput tweak.
 setup, and were initially mislabelled `ARTIFACT_AGENT_SETUP_FAILED`. They are
 now `ARTIFACT_MODEL_QUOTA_429`. The two route to different owners: apt 404 is
 ours to fix, quota exhaustion is the gateway's capacity.
+
+### Apt fix v2 is unnecessary — the Node pin already bypasses apt entirely
+
+A follow-up investigation found that `archive.debian.org` carries **no
+`debian-security` suite for bullseye**, so rewriting that line to the archive
+host still 404s and the security line must be *deleted*, not rewritten. That
+finding is correct in isolation, and would matter for any image that reaches
+apt.
+
+**No image in this run does.** Measured across all 7 fixup trials
+(`runs-fixup`), covering buster *and* bullseye bases:
+
+```
+deepdiff__fFcGCAa       reward=-         exc=no  apt_errs=0
+deepdiff__sCBxcoN       reward=-         exc=no  apt_errs=0
+more-Itertools__K2x9T4G reward=-         exc=no  apt_errs=0
+more-Itertools__39Mm2jr reward=-         exc=no  apt_errs=0
+flask-restful__6KAohgZ  reward=1.000000  exc=no  apt_errs=0
+flask-restful__VDLzPdk  reward=1.000000  exc=no  apt_errs=0
+flask-restful__3gjirmY  reward=0.000000  exc=no  apt_errs=0   (nop control)
+```
+
+`deepdiff` is the bullseye case — the one the v2 fix targets. Its trial.log
+contains **zero `apt-get update|install` invocations**, and its
+`agent/opencode.txt` is at 745KB updated within the minute, i.e. well past
+setup and actively running.
+
+The reason is the *other* half of the original repair: pinning Node v22 into
+the image makes Harbor's `ensure_system_dependencies` probe succeed, and that
+function **returns early without shelling out to apt**. The archive rewrite
+was only ever defense-in-depth for something else in the image invoking apt;
+nothing does.
+
+**Conclusion:** the security-suite deletion is worth keeping in the generator
+for correctness, but it is not blocking anything and no re-verification run is
+needed. Zero exceptions across all 7 fixup trials.
+
+### 429 urgency: correctly downgraded
+
+All 4 quota failures hit within ~16 minutes of startup, when 8 agents began
+simultaneously; none in the hours since, and endpoint probes return 200. A
+startup burst, not an ongoing bleed. The concurrency 2->1 change already
+applied to the configs stays (it costs nothing and removes the herd at the
+next relaunch), but it needed no restart and none was performed.
