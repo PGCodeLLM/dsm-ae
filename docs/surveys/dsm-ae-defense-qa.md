@@ -725,3 +725,42 @@ failures in its denominator. Two live root causes were only visible this way:
 apt 404s on EOL Debian images (fixed), and HTTP 429 credential cooldowns from
 the upstream provider (~2.4h resets, three firing in the same minute from
 concurrent agents — a thundering herd, not our rpm setting).
+
+### Q20. You exclude on Harbor's exception *type*. What if the labels are wrong?
+
+**They are wrong, and the exclusion design tolerates it — by accident rather
+than by foresight, which is worth saying plainly.**
+
+Two demonstrated mislabels:
+
+- On the DGX runs, an `ApiRateLimitError` was actually an **OOM kill**:
+  `exit 137` (128+9, SIGKILL), **zero** 429 markers, a 333KB agent log
+  showing normal work, and 54GB free on the host against a 4096MB per-task
+  cgroup cap. A genuine quota failure looks different — it carries
+  `"All credentials ... cooling down"` and `statusCode: 429`.
+- In the reference bundles, an `UnknownApiError` is a **shell failure**:
+  `"Command failed (exit 1): export PATH=..."`. Nothing to do with an API.
+
+Why the mapping is nonetheless unaffected: `HarborTrial.scoreable` excludes on
+the *presence* of `exception_info`, not on its type. Whether a trial died of
+OOM, quota, or a broken shell line, the conclusion is identical — the harness
+failed, so the reward is not a measurement of the model. The 119 reference
+exclusions stand exactly as computed.
+
+**But the labels must not be used for anything finer than presence.** Any
+analysis that groups, rates, or reasons *by exception type* — "how often do we
+lose trials to rate limits?" — will be wrong. The operational fix differs
+sharply per true cause (OOM: raise `memory_mb`; 429: wait or reduce
+concurrency; shell failure: fix the task definition), so triage classifies on
+**observable evidence** (exit code, 429 markers, host memory) rather than on
+the exception type Harbor reports.
+
+**Third instance of one pattern.** Q17: the reward can lie (scored 0 with zero
+tests run). Q19: the human-readable log can omit the failure entirely
+(`trial.log` clean while `result.json` carries the exception). Q20: the
+machine-readable failure record can be *mislabelled*. Each layer of the oracle
+needed independent verification against raw evidence, and each one had a
+defect that a reasonable person would not have predicted from the layer above.
+The general rule: **verify at the level of what was physically observed —
+exit codes, test counts, log bytes — not at the level of what some component
+concluded about it.**
