@@ -886,3 +886,38 @@ it up.
 If 429s do reappear after the relaunch, staggering the two job starts is the
 better lever than halving concurrency permanently — it removes the herd
 without paying for it in wall-clock for the rest of the run.
+
+### Problem 16: a drain gate on an unreachable condition never fires
+
+`switch_nogo_v2.sh` waited for the live SWE-bench-Pro trial count to reach
+zero. It never will. With ~50 tasks still queued per job, Harbor backfills a
+new trial the instant one completes, so the count oscillates rather than
+settling — observed directly in the log:
+
+```
+08:08  3 live trial(s); waiting
+08:13  4 live trial(s); waiting
+08:18  4 live trial(s); waiting
+```
+
+The 4→3→4 bounce is the tell: that is not slow progress toward zero, it is a
+steady state. Harbor's launcher exposes no `--drain` or graceful-stop flag
+(only timeout multipliers and `--max-retries`), so "wait for quiet" is not
+achievable while work remains queued.
+
+**Replaced with a low-water gate** (`switch_nogo_v3.sh`): switch as soon as no
+in-flight trial has more than ~20KB of agent output, with a 90-minute cap.
+Rationale — a trial at 0B is still in setup and loses nothing; one at 300KB is
+mid-reasoning and worth waiting out. Crucially, **every in-flight task is
+re-queued by the relaunch**: Harbor skips only *completed* trials, so an
+interrupted trial is re-run, not dropped from the sample. That makes the
+tradeoff "a few minutes of duplicated agent work" against "~8h of unscoreable
+Go spend," which is not close.
+
+Verified before arming: `peak_live_bytes()` returned 297874B against a
+largest-in-flight of ~293KB, i.e. it correctly refuses to switch right now.
+
+**General lesson:** when arming a gate, check that its condition is reachable
+under the system's own steady-state behaviour. The v2 gate was safe in the
+sense that it would never destroy work — and useless for exactly the same
+reason.

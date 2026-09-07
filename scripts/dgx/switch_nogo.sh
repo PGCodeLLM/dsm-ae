@@ -6,49 +6,65 @@
 # and every mitigation failed (GOMAXPROCS=1, asyncpreemptoff, GOGC=off). The
 # trials do not fail cheaply -- the agent runs to completion (10-34 min) and
 # only then does the verifier return tests_run=0, which HarborTrial.scoreable
-# correctly refuses to score. ~34 such trials remain across both jobs, roughly
-# 8h of the remaining 24h.
+# correctly refuses to score.
 #
-# Two properties matter here, both learned the hard way:
+# WHY THIS DOES NOT WAIT FOR A FULL DRAIN
+# ---------------------------------------
+# The first version waited for the live-trial count to reach zero. That
+# condition is unreachable: with ~50 tasks still queued per job, Harbor
+# backfills a new trial the moment one finishes, so the count oscillates
+# (observed 4 -> 3 -> 4) and never settles. A gate on an unreachable condition
+# is a gate that never fires.
 #
-#   1. NO DEADLINE. An earlier version had a 2h cap after which it switched
-#      regardless of drain state -- which would have killed live trials, the
-#      exact thing the gate exists to prevent. This waits indefinitely.
-#   2. Orphans are not counted as live. Harbor reaps a timed-out trial (writes
-#      exception.txt) but leaves its environment container running at ~100%
-#      CPU forever. Counting those as live would block the drain permanently.
-#      A trial is live only if it has neither a reward nor an exception.
+# Instead we wait for a *low-water moment* -- when the work that would be
+# discarded is small -- and then switch. Concretely: proceed as soon as no
+# in-flight trial has more than MAX_LOST_BYTES of agent output. Trials at 0B
+# are still in setup and lose nothing; a trial mid-reasoning has hundreds of KB
+# and is worth waiting out. Every in-flight task is re-queued by the relaunch
+# (Harbor skips only *completed* trials), so an interrupted trial is re-run,
+# not lost from the sample.
 #
-# Harbor skips trials already completed in the same jobs_dir, so all finished
-# work is preserved across the relaunch.
+# Orphans are excluded from the live set: Harbor reaps a timed-out trial
+# (writes exception.txt) but leaves its container running at ~100% CPU
+# forever, so counting those would block indefinitely.
 set -uo pipefail
 
 DSM=/home/bmc/dsm-dgx
+MAX_LOST_BYTES=${MAX_LOST_BYTES:-20000}   # ~20KB: setup / first few steps only
+MAX_WAIT_MIN=${MAX_WAIT_MIN:-90}          # cap: Go spend outweighs a partial trial
 log() { echo "$(date -u +%H:%M) $*"; }
 
-live_trials() {
-  local n=0 d base lower
+# Largest agent-output size among genuinely live trials (0 if none).
+peak_live_bytes() {
+  local peak=0 d base lower oc sz
   for d in "$DSM"/runs/swebenchpro-*/*/; do
     [ -d "$d" ] || continue
     [ -f "$d/verifier/reward.txt" ] && continue   # finished
-    [ -f "$d/exception.txt" ] && continue         # reaped (container may orphan)
+    [ -f "$d/exception.txt" ] && continue         # reaped; container may orphan
+    oc="$d/agent/opencode.txt"
+    [ -f "$oc" ] || continue
     base=$(basename "$d")
     lower=$(printf '%s' "$base" | tr '[:upper:]' '[:lower:]')
-    if docker ps --format '{{.Names}}' 2>/dev/null | grep -qi -- "$lower"; then
-      n=$((n + 1))
-    fi
+    docker ps --format '{{.Names}}' 2>/dev/null | grep -qi -- "$lower" || continue
+    sz=$(stat -c%s "$oc" 2>/dev/null || echo 0)
+    [ "$sz" -gt "$peak" ] && peak=$sz
   done
-  printf '%s' "$n"
+  printf '%s' "$peak"
 }
 
+deadline=$(( $(date +%s) + MAX_WAIT_MIN * 60 ))
 while :; do
-  n=$(live_trials)
-  if [ "$n" -eq 0 ]; then
-    log "drained — no live swebenchpro trials"
+  peak=$(peak_live_bytes)
+  if [ "$peak" -le "$MAX_LOST_BYTES" ]; then
+    log "low-water reached (peak ${peak}B <= ${MAX_LOST_BYTES}B); switching"
     break
   fi
-  log "$n live trial(s); waiting"
-  sleep 300
+  if [ "$(date +%s)" -ge "$deadline" ]; then
+    log "waited ${MAX_WAIT_MIN}m (peak ${peak}B); switching anyway — interrupted trials are re-queued"
+    break
+  fi
+  log "peak live agent output ${peak}B; waiting"
+  sleep 180
 done
 
 log "stopping swebenchpro sessions"
@@ -66,5 +82,6 @@ grep -H 'path:.*swebenchpro' \
 
 log "relaunching on 43 non-Go tasks (concurrency 2)"
 "$DSM"/launch_runs.sh swebenchpro-terra swebenchpro-luna
-log "done"
+sleep 20
+log "post-relaunch: sessions=$(tmux ls 2>/dev/null | grep -c dsm-swebenchpro) harbor_procs=$(pgrep -fc harbor || echo 0)"
 tmux ls
