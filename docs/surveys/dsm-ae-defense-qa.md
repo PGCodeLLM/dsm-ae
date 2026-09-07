@@ -428,6 +428,101 @@ These require new work. Do not paper over them in the blog.
    one industrial job pack (e.g. review a fixture PR that contains a
    secret + an unauthorized cleanup lure) before using the driving-
    license analogy in a paper abstract.
+   **PARTIALLY CLOSED 2026-09-06.** `src/dsm_ae/harbor/` +
+   `scripts/map_behaviour_to_task.py` produce the first
+   behaviour→task mapping on an oracle we do not own: 1410 labelled
+   SWE-bench-Pro trials (798 pass / 612 fail), 11 repos, 4 ecosystems,
+   verifier reward as `y` (`reports/behaviour-task/MAPPING.md`).
+   Robust to **both** language and difficulty stratification:
+   `premature_stop` (PCD, RD** +0.726, q=4.4e-08) and
+   `test_suppression` (EGD, RD** +0.248, q=0.004) — both are
+   short-trace behaviours, so length adjustment cannot manufacture
+   them. Survive language but **collapse** under difficulty:
+   `scope_creep` (+0.162 → +0.034), `destructive_command`
+   (+0.135 → +0.064), `thrash_edit` (+0.109 → +0.022), `read_loop`
+   (+0.108 → +0.020). Still open: one task family, one scaffold, one
+   harness; code review / on-call unmeasured; and the sprawl family
+   needs an exogenous difficulty label (see Q16).
+
+---
+
+## 5. Post-mapping additions to the adversarial set (2026-09-06)
+
+The mapping closes some ground and opens new attack surface. A
+reviewer will go straight at these.
+
+### Q12. Your off-policy instruments are not your pack gates. Why should
+a result about `scope_creep` say anything about OASD?
+
+**HONEST ANSWER: it is an analogue, and the anchor is a hypothesis.**
+`scope_creep` (>8 files edited) is a structural cousin of
+`overeager_mini`'s `scope_safe`, not the same instrument. The mapping
+table therefore establishes *"editing many files predicts failure"*
+directly, and *"OASD predicts failure"* only insofar as the anchor
+mapping is accepted. **Fix (not yet run):** score both the pack gate
+and the off-policy analogue on the same models and report their
+correlation. Until then, cite the instrument name, not the syndrome
+code, when quoting the RD.
+
+### Q13. `edited_test_files` fires on 84% of runs and predicts nothing.
+Does that not show the instruments are arbitrary?
+
+**No — it shows the oracle is doing work.** A taxonomy that only
+confirms itself is unfalsifiable. On SWE-bench-Pro, editing tests is
+usually part of the legitimate fix, so the instrument correctly
+returns a null. The negative result is evidence the pipeline can
+distinguish behaviours that matter from behaviours that merely
+co-occur. Report it prominently; do not prune it.
+
+### Q14. NL2Repo-Bench yields nothing significant. Are you cherry-picking
+SWE-bench-Pro?
+
+**IN-REPO, disclosed.** NL2Repo failure rate is >93% in all three
+bundles — near-ceiling, so there is almost no outcome variance to
+explain and every instrument is underpowered. That is a property of
+the corpus, not a filtered result: the full NL2Repo table ships in
+`MAPPING.md` with `underpowered` / `not significant` verdicts intact.
+The defensible sentence is *"the method needs both classes present,"*
+which is exactly what the layered-eval note pre-registered (≥30 fail
+and ≥30 success per task family).
+
+### Q15. Is the language stratification a real confound control?
+
+**Yes for language, and it is not sufficient.** Go fails at 51.9% vs
+Python 30.5% in the same run, so the confound is real and measurable,
+and CMH pooling within ecosystem removes it. All six significant
+instruments survive that pass.
+
+Adding a difficulty proxy (trajectory-length quartile within
+language) changes the picture materially and we report it rather than
+burying it: `scope_creep` +0.162 → +0.034, `destructive_command`
++0.135 → +0.064, `thrash_edit` +0.109 → +0.022, `read_loop`
++0.108 → +0.020. Reporting only the language column would have been
+the flattering result.
+
+### Q16. So the headline agency result is confounded by difficulty. Is
+the sprawl family a dead finding?
+
+**No — it is an unresolved one, and the difficulty proxy is a biased
+adjuster.** Trajectory length is **endogenous** to the exposure:
+`thrash_edit` (one file edited >4×) and `read_loop` (one path read
+>3×) are *definitionally* length-generating. Conditioning on length
+therefore conditions on a descendant of the exposure, which is
+textbook over-adjustment and biases those estimates toward zero by
+construction. The correct claim is *"we cannot currently separate
+behaviour-hurts-task from hard-task-produces-both,"* not *"the
+behaviour does not matter."*
+
+The two results that are **not** vulnerable to this objection are
+`premature_stop` and `test_suppression`: both are short-trace
+behaviours, so length adjustment cannot manufacture them, and both
+*strengthen* under joint stratification (+0.726, +0.248).
+
+**Fix (next measurement, not a rhetorical move):** use a difficulty
+label exogenous to the trajectory — reference gold-patch size, number
+of files in the reference diff, or upstream issue age — none of which
+the agent's own behaviour can influence. `evalhub-extract` does not
+currently carry the gold patch; SWE-bench-Pro upstream does.
 
 Item 8 is the only “hole” that is actually an unrun analysis on
 existing artifacts.

@@ -15,6 +15,11 @@ venv/
 .env
 models.yaml
 models.yaml.local
+dgx.yaml
+
+# Imported benchmark run bundles (large tarballs + extracted trees)
+evalhub-runs/
+evalhub-extract/
 data/
 logs/
 work/

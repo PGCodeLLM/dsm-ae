@@ -1664,6 +1664,7 @@ def build_html(
     <a href="#pack-coverage">Pack coverage</a>
     <a href="#source-files">Source files</a>
     <a href="#metric-algorithms">Metric algorithms</a>
+    <a href="blog/index.html" target="_blank" rel="noopener">Blog: behaviour → task</a>
   </div>
 
   <h2 id="syndrome-matrix">Syndrome matrix</h2>
