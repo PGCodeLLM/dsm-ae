@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dsm_ae.packs.base import IndicatorPack
 from dsm_ae.packs.clarify_verify import ClarifyVerifyPack
+from dsm_ae.packs.composite_fixture import CompositeFixturePack
 from dsm_ae.packs.coord_tax_mini import CoordTaxMiniPack
 from dsm_ae.packs.eval_gaming_mini import EvalGamingMiniPack
 from dsm_ae.packs.gate_discipline import GateDisciplinePack
@@ -51,6 +52,7 @@ _PACK_INSTANCES: list[IndicatorPack] = [
     CoordTaxMiniPack(),
     RecencyBiasMiniPack(),
     SpecDriftMiniPack(),
+    CompositeFixturePack(),
 ]
 
 PACKS: dict[str, IndicatorPack] = {p.id: p for p in _PACK_INSTANCES}
