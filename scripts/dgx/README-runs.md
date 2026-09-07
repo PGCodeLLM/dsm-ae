@@ -921,3 +921,32 @@ largest-in-flight of ~293KB, i.e. it correctly refuses to switch right now.
 under the system's own steady-state behaviour. The v2 gate was safe in the
 sense that it would never destroy work — and useless for exactly the same
 reason.
+
+### Problem 17: an agent cat'd a binary into its transcript (198MB)
+
+`instance_internetarchive__openli__3VLU8dC` grew its `opencode.txt` to
+**198MB at ~25MB/min**. The tail is raw x86 machine code — the agent dumped a
+binary file into its own output. 33% of the last 200KB is non-printable.
+
+This is a genuine (if pathological) agent behaviour worth noting on its own:
+an agent exploring a repo can destroy its own context and burn tokens by
+`cat`-ing a compiled artifact. Disk was never at risk here (2.0T free).
+
+**It also broke the low-water gate**, which used raw file size as a proxy for
+"how much reasoning would be lost on interrupt". Byte count does not
+distinguish reasoning from garbage, so this single trial pinned the gate open
+and it would have waited out its full cap for no reason.
+
+Fixed: `peak_live_bytes()` now measures **printable bytes over a bounded 2MB
+tail** rather than raw size. Effect on the live measurement was immediate:
+
+```
+before  198,544,910 B
+after     1,360,406 B
+```
+
+The 2MB cap also keeps the check cheap when a transcript is enormous.
+
+**Lesson:** a heuristic that stands in for "how much work would be lost" must
+be robust to output that is large but worthless. Prefer a bounded, filtered
+measurement over a raw size whenever an agent controls what lands in the file.

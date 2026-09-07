@@ -35,6 +35,13 @@ MAX_WAIT_MIN=${MAX_WAIT_MIN:-90}          # cap: Go spend outweighs a partial tr
 log() { echo "$(date -u +%H:%M) $*"; }
 
 # Largest agent-output size among genuinely live trials (0 if none).
+#
+# Measured over a bounded tail, and only over *printable* bytes. Raw file size
+# is not a usable proxy for "how much reasoning would be lost": an agent that
+# cats a binary into its transcript inflates it without doing any work. One
+# trial hit 198MB at ~25MB/min this way, 33% of it non-printable machine code,
+# which would have pinned the gate open forever. Capping the sample at 2MB
+# also keeps this cheap when a transcript is enormous.
 peak_live_bytes() {
   local peak=0 d base lower oc sz
   for d in "$DSM"/runs/swebenchpro-*/*/; do
@@ -46,7 +53,7 @@ peak_live_bytes() {
     base=$(basename "$d")
     lower=$(printf '%s' "$base" | tr '[:upper:]' '[:lower:]')
     docker ps --format '{{.Names}}' 2>/dev/null | grep -qi -- "$lower" || continue
-    sz=$(stat -c%s "$oc" 2>/dev/null || echo 0)
+    sz=$(tail -c 2000000 "$oc" 2>/dev/null | tr -dc '[:print:][:space:]' | wc -c)
     [ "$sz" -gt "$peak" ] && peak=$sz
   done
   printf '%s' "$peak"
