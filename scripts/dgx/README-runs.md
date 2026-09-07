@@ -483,8 +483,10 @@ E: The repository 'http://archive.debian.org/debian-security bullseye-security
    Release' does not have a Release file.
 ```
 
-Fix v2 under test (tmux `apttest3`): point the main suites at the archive **and
-delete the security lines**, which no longer exist anywhere for an EOL release:
+**Fix v2 VERIFIED WORKING** (tmux `apttest3`): point the main suites at the
+archive **and delete the security lines**, which no longer exist anywhere for an
+EOL release. Result: `exit=0`, `Setting up nodejs`, `node v12.22.12`,
+`npm 7.5.2` -- i.e. the exact command that was failing now succeeds:
 
 ```dockerfile
 RUN sed -i -e '/debian-security/d' -e '/security.debian.org/d' \
@@ -616,3 +618,119 @@ simultaneously; none in the hours since, and endpoint probes return 200. A
 startup burst, not an ongoing bleed. The concurrency 2->1 change already
 applied to the configs stays (it costs nothing and removes the herd at the
 next relaunch), but it needed no restart and none was performed.
+
+## 12. Reconciliation: does the apt fix still matter? (both measurements were right)
+
+The parent session measured `apt_errs=0` and **zero apt-get invocations** across
+its 7 fixup trials; I measured **22 of 36 trials invoking apt-get**, including
+all 8 APT_404 failures. Both are correct -- they were measuring *different
+datasets*.
+
+The fixup tasks (`datasets/nl2repo-fixup`) carry an extra Dockerfile layer that
+installs a **pinned Node v22.23.2 from a checksummed official tarball**. Harbor's
+opencode setup probes `command -v node && command -v npm` first and only falls
+through to `apt-get install ... nodejs npm` when that fails. With Node
+preinstalled the probe returns early, so **apt is never reached**:
+
+```
+MAIN  deepdiff  -> Running command: apt-get update && apt-get install ...   (404, exit 100)
+FIXUP deepdiff  -> Running command: set -euo pipefail; if ldd --version ... (apt=0, 895 KB agent output)
+```
+
+**Conclusion for the 8 APT_404 trials:** they are recoverable *only* by
+regenerating against a task definition that avoids the apt path. The Node-pin
+approach is strictly better than my sources.list rewrite:
+
+- it removes the dependency on any distro feed rather than repairing one;
+- it is deterministic (pinned version + sha256), so it cannot drift;
+- it sidesteps the fact that the images ship **Node v12.22.12 / npm 7.5.2**
+  (what my apt fix installs) -- ancient, and a plausible source of further
+  opencode failures.
+
+My `archive.debian.org` fix is still worth keeping for correctness (any task
+that *does* reach apt on an EOL base will now work, and deleting the
+`debian-security` line rather than rewriting it is required -- that suite does
+not exist on the archive). But it is the fallback, not the primary fix.
+
+## 13. Final accounting: NL2Repo-Bench main jobs (20 trials, both finished ~4h)
+
+```
+10  REWARDED        (5 instances x 2 models, all scored)
+ 8  APT_404         (4 instances x 2 models: deepdiff, flask-restful,
+                     graphneuralnetwork, pyperclip -- agent never ran)
+ 2  RuntimeError    (more-Itertools x 2: "Docker compose command failed" --
+                     the image-name casing bug, fixed after these launched)
+--
+20  total -- fully accounted for, nothing unexplained
+```
+
+Rewards (identical instances across both models, which is itself a good
+consistency signal):
+
+```
+paillier        1.000000 / 1.000000      sklearn    0.985714 / 0.985714
+stamina         0.983871 / 0.983871      mootdx     0.666667 / 0.657143
+mechanicalsoup  1.000000 / 0.000000
+```
+
+Only `mechanicalsoup` diverges between models, and the 0.000000 side is the
+**429 quota** trial (`qvyiCUS`) -- an infrastructure loss, not a luna/terra
+capability difference. Reward parity everywhere else suggests the harness is
+measuring stably.
+
+
+### Correction: apt DOES still matter — I measured the wrong dataset
+
+An earlier entry above ("Apt fix v2 is unnecessary") generalized from the
+**fixup** trials to all trials. That was wrong. Measured across both:
+
+```
+main nl2repo trials invoking apt-get:  18
+fixup trials invoking apt-get:          0
+```
+
+Both observations were correct; they were of **different task definitions**.
+The fixup Dockerfile preinstalls a checksummed Node v22.23.2 tarball, and
+Harbor's `ensure_system_dependencies` probes `command -v node && npm` before
+falling through to `apt-get install nodejs npm` — so the fixup path never
+reaches apt, while the un-regenerated main path still does and still 404s.
+
+**Consequence:** the 8 `ARTIFACT_APT_404` trials are **not** already fine.
+They are recoverable only by regenerating those tasks against a definition
+that avoids the apt path.
+
+**Which fix is primary.** The Node pin, not the archive rewrite:
+
+- it removes the distro-feed dependency rather than repairing it, and is
+  deterministic (pinned version + sha256);
+- the apt path, even when repaired, installs **Node v12.22.12 / npm 7.5.2**
+  from bullseye — ancient, and a plausible source of downstream opencode
+  failures. A "working" apt fix would have quietly shipped a Node three major
+  versions behind what opencode expects.
+
+Keep the `archive.debian.org` rewrite (with `debian-security` **deleted**, not
+rewritten — that suite does not exist on the archive) only as a fallback for
+any task that still reaches apt.
+
+### NL2Repo final accounting — 20 trials, nothing unexplained
+
+```
+10  REWARDED
+ 8  ARTIFACT_APT_404      deepdiff, flask-restful, graphneuralnetwork, pyperclip (x2 models)
+ 2  ARTIFACT_RuntimeError more-Itertools x2 -- "Docker compose command failed" (casing bug)
+```
+
+No new failure classes. The 429s are not in this set; they hit SWE-bench-Pro
+and `mechanicalsoup`, and `mechanicalsoup` still scored.
+
+Cross-model parity on the rewarded trials is near-exact:
+
+```
+paillier        1.000000 / 1.000000     sklearn   0.985714 / 0.985714
+stamina         0.983871 / 0.983871     mootdx    0.666667 / 0.657143
+mechanicalsoup  1.000000 / 0.000000
+```
+
+Only `mechanicalsoup` diverges, and the zero side is the 429 quota trial
+(`qvyiCUS`) — an infrastructure loss, not a luna/terra capability gap. That
+parity is a useful stability signal for the harness itself.
