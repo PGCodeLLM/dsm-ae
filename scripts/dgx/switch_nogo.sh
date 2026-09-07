@@ -64,7 +64,7 @@ grep -H 'path:.*swebenchpro' \
   "$DSM"/configs/swebenchpro-terra.yaml \
   "$DSM"/configs/swebenchpro-luna.yaml
 
-log "relaunching on 43 non-Go tasks"
+log "relaunching on 43 non-Go tasks (concurrency 2)"
 "$DSM"/launch_runs.sh swebenchpro-terra swebenchpro-luna
 log "done"
 tmux ls

@@ -734,3 +734,155 @@ mechanicalsoup  1.000000 / 0.000000
 Only `mechanicalsoup` diverges, and the zero side is the 429 quota trial
 (`qvyiCUS`) — an infrastructure loss, not a luna/terra capability gap. That
 parity is a useful stability signal for the harness itself.
+
+## 14. Later-emerging artifacts (found after the NL2Repo jobs finished)
+
+### apt 404 also hits SWE-bench-Pro (not just NL2Repo)
+`ARTIFACT_APT_404` rose 8 -> 10 as `gravitational/teleport` trials landed on
+both models. Their images are **bullseye** too, with 4 x `404 Not Found`. So the
+EOL-Debian problem is not NL2Repo-specific -- any task whose base is an archived
+Debian release and whose setup reaches apt will fail the same way. The Node-pin
+fix (parent session's approach) covers these as well, since it stops setup ever
+reaching apt.
+
+Note these are *gravitational* trials, i.e. Go -- already unmeasurable here for
+the qemu reason. They would need the Node pin **and** real x86 to yield data.
+
+### `ApiRateLimitError` is mislabeled -- it is an OOM, not a rate limit
+One trial (`instance_internetarchive__openli__bStsLW`, terra) is recorded by
+Harbor as `ApiRateLimitError`. That label is wrong, and taking it at face value
+would send a future investigator hunting a quota problem that does not exist:
+
+```
+exception : ApiRateLimitError, "Command failed (exit 137): ... opencode run ..."
+429 markers in opencode.txt : 0        (a real quota failure leaves "cooling down")
+opencode.txt                : 333 KB   (the agent had been working normally)
+task memory_mb              : 4096
+host free memory            : 54 GB    (so the HOST was not short of memory)
+```
+
+**Exit 137 = 128 + 9 = SIGKILL.** With no 429 markers, plenty of host memory,
+and a hard 4096 MB per-task cap, this is the container's cgroup OOM-killing
+opencode -- `internetarchive/openlibrary` is a heavy Python repo and opencode
+holds a large context. Compare the genuine quota failures, which carry
+`"All credentials ... are cooling down"` and `statusCode: 429` (see Artifact D).
+
+**Implication:** distinguish these two. A real 429 is a provider capacity issue
+that resolves on its own; an OOM is fixed by raising `memory_mb` for that task.
+`triage_rewards.py` currently trusts Harbor's exception type here and will
+report it as `ARTIFACT_ApiRateLimitError`; treat that verdict as
+"agent killed -- check for exit 137 and 0 x 429 markers before assuming quota".
+
+## 15. Why TypeScript still has zero trustworthy data (4 trials, 4 different artifacts)
+
+All 17 TS/JS instances are measurable in principle -- the language is not
+blocked the way Go is -- but every TS trial completed so far has been lost to a
+*different* artifact:
+
+```
+protonmail cENF6s2  ARTIFACT_AGENT_NEVER_STARTED       0-byte opencode.txt, 100 min
+protonmail t9zVbpW  ARTIFACT_TIMEOUT_BUDGET_TOO_SMALL  384 KB, killed mid-step
+tutao      rCo7Tw   ARTIFACT_GRADER_NAME_MISMATCH      tests passed, name unmatched
+tutao      DD4qHm   ARTIFACT_MODEL_QUOTA_429           provider cooldown
+```
+
+This is bad luck rather than a systematic TS problem, but it means **no TS
+conclusion can be drawn yet**, and the per-language table correctly shows
+nothing rather than a fabricated 0.000.
+
+### AgentTimeoutError conflates two different failures
+The two protonmail trials shared one exception type but are not the same event,
+and they need opposite responses:
+
+- `cENF6s2`: **0 bytes** of agent output over the full 100 minutes -- the agent
+  never issued a model call (the startup hang in section 10). Retrying is the
+  right response; more time would not have helped.
+- `t9zVbpW`: **384 KB** and still completing steps at the cutoff (last record is
+  a `step-finish` with 62 120 tokens and cache reads). Genuine work, truncated.
+  Here the budget really is too small: `timeout_sec = 3000` x2 = 6000 s, and
+  `protonmail/webclients` is a large monorepo whose file operations are slow
+  under emulation.
+
+`triage_rewards.py` now splits these into `ARTIFACT_AGENT_NEVER_STARTED` and
+`ARTIFACT_TIMEOUT_BUDGET_TOO_SMALL` by output size, so the fix is obvious from
+the verdict. If TS trials keep hitting the cap, raise
+`--agent-timeout-multiplier` from 2 to 3-4 for the SWE-bench-Pro jobs.
+
+### Go containment confirmed
+All 10 `ARTIFACT_NO_TESTS_RAN` are Go, and no non-Go trial has ever landed in
+that class. The qemu defect is exactly as scoped -- it has not leaked into
+Python, TypeScript or JavaScript.
+
+## 16. Zero tests is not automatically an artifact (correction from the parent session)
+
+`triage_rewards.py` classified any trial with `output.json == {"tests": []}` as
+`ARTIFACT_NO_TESTS_RAN`. That rule is too broad. The parent session found, in
+the reference corpus, that some zero-test trials are **pytest collection
+errors** -- the agent's own patch broke an import, so nothing could be
+collected. That is a *genuine model failure* and must stay in the scored set;
+excluding it discards real signal (narrowing the exclusion moved
+`premature_stop` to the strongest result in their mapping).
+
+Two further corrections to what I had written earlier:
+
+- The zero-test artifact is **not Go-exclusive in general**. The reference
+  bundles contain 31 TypeScript and 6 Python zero-test trials. It is Go-only
+  *in these DGX runs*, which is a fact about this hardware, not about the
+  benchmark.
+- So "Go containment breaking" would not have invalidated anything. My monitor
+  alert on that was also a false positive: it matched the indented summary
+  counter line (`  ARTIFACT_NO_TESTS_RAN    16`) and read "16" as a language.
+  Detail rows start at column 1; the fixed check anchors with `^`.
+
+The classifier now checks the verifier stdout for `ERROR collecting`,
+`ImportError`, `ModuleNotFoundError` or `errors during collection` before
+quarantining a zero-test trial, and scores it `GENUINE_FAIL` when present.
+
+**Verified against the current DGX runs: zero reclassifications** -- all 16
+zero-test trials there are Go runtime crashes with no collection error, so the
+counts are unchanged. The guard matters for future runs and for any re-analysis
+of the reference corpus.
+
+## 17. Go-free switch: AUTHORISED and armed (v2)
+
+The user approved switching SWE-bench-Pro to the 43-task Go-free dataset; the
+cost projection in section 15 is what informed it (2.1 trials/h/job, ~34 Go
+trials remaining ~= 8h of the projected 24h producing nothing measurable).
+
+Armed by the parent session as `switch_nogo_v2.sh`, tmux `nogo-v2`, log
+`logs/nogo-v2.log`. **This is expected automation -- do not escalate it as
+unattributed.** Two fixes over the version that was killed:
+
+1. **No deadline.** v1 switched after 2h regardless of drain, which would have
+   killed live trials. v2 waits indefinitely for a real drain.
+2. **Orphans excluded from the live count.** A trial is live only if it has
+   neither a reward nor an `exception.txt`. Harbor reaps a timed-out trial but
+   leaves its container running at ~100% CPU forever; counting those would
+   block the drain permanently.
+
+On firing it kills both `dsm-swebenchpro-*` sessions, repoints the configs at
+`datasets/swebenchpro-nogo`, and relaunches at concurrency 1. Harbor skips
+completed trials in the same `jobs_dir`, so the existing rewards survive.
+
+Monitoring adjusted accordingly: watching relaunch completion (a failed
+relaunch would silently end the run) and orphaned containers (each blocks the
+drain); Go-containment watch dropped as moot post-switch.
+
+
+### Concurrency restored to 2 before the switch relaunch (2026-09-07 07:51)
+
+The 2->1 drop was applied when 429 quota failures looked like an ongoing
+bleed. They were not. All four cluster at **00:03-00:19** — a thundering herd
+from 8 agents starting simultaneously — with **none in the 7.5h since**, and
+endpoint probes returning 200 throughout.
+
+Leaving concurrency at 1 through the relaunch would have roughly halved
+throughput against ~16h of remaining non-Go work, buying nothing: the pressure
+it guards against was a startup transient, and the relaunch itself is the only
+moment that recreates a simultaneous start. Restored to 2 in the
+`swebenchpro-*` configs before `switch_nogo_v2` fires, so the relaunch picks
+it up.
+
+If 429s do reappear after the relaunch, staggering the two job starts is the
+better lever than halving concurrency permanently — it removes the herd
+without paying for it in wall-clock for the rest of the run.
