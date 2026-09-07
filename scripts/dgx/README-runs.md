@@ -303,3 +303,39 @@ sed -i 's|datasets/swebenchpro$|datasets/swebenchpro-nogo|' \
 
 Harbor skips trials it has already completed in the same `jobs_dir`, so the
 finished Python/TS/JS trials are preserved.
+
+### DECISION (2026-09-07): switch to `swebenchpro-nogo`, drain first
+
+Option 2 chosen. Go is **not measurable on this hardware** and the failure is
+not a tunable: the Go runtime dies under `qemu-x86_64` on aarch64 with
+`fatal error: lfstack` (or SIGSEGV) on a clean checkout with no agent
+involved, and every mitigation failed — `GOMAXPROCS=1 -p 1`,
+`GODEBUG=asyncpreemptoff=1`, `GOGC=off`, and combinations.
+
+The deciding factor was cost, not principle. Go trials do **not** fail
+cheaply: the agent runs to completion first (gravitational ~10 min,
+navidrome ~34 min) and only then does the verifier fail in ~15s with
+`tests_run=0`. That is 27 Go instances x 2 models = **54 trials** paying full
+token cost for rewards that `HarborTrial.scoreable` correctly refuses to
+score, while consuming rpm=6 budget the measurable strata need.
+
+Executed as `~/dsm-dgx/switch_nogo.sh` in tmux `nogo-switch` rather than
+immediately: it polls until no `instance_*` containers remain (2h cap), then
+kills and relaunches the two SWE-bench-Pro jobs against
+`datasets/swebenchpro-nogo`. Restarting mid-trial would have discarded up to
+an hour of already-paid agent work on four non-Go trials that survive the
+switch anyway. Harbor skips completed trials in the same `jobs_dir`.
+
+**Consequence for the study, stated plainly:** the SWE-bench-Pro arm on this
+box covers Python / TypeScript / JavaScript only. Go is the largest non-Python
+stratum in the sample (27 of 70), so its absence is a real limitation, not a
+rounding error — the matched-triad composite fixture (`fixtures/composite/`)
+carries the Go arm instead, where the toolchain runs natively. Reproducing the
+Go SWE-bench-Pro subset requires real x86_64 hardware; seed 42 makes the
+selection reproducible anywhere.
+
+**TypeScript is provisional too.** `tutao` suffers a grader mismatch where the
+suite passes but scores 0 because the expected test name embeds an assertion
+count that shifts with the code. The reference harness does not show this.
+Unlike "zero tests ran", "passed but mis-scored" has no clean structural
+signature, so it is detected but not auto-excluded.
