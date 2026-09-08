@@ -965,3 +965,53 @@ new model calls, not reanalysis.
 tightened an estimate while leaving the headline standing. This one removed
 the headline. That asymmetry is the point: a correction pipeline that never
 costs you a result is not auditing anything.
+
+### Q25. Do the packs discriminate between models at all?
+
+**Mostly no, and this is the most consequential measured fact about the
+battery.** From the smoke-test criteria survey
+(`docs/surveys/2026-09-08-smoke-test-criteria-survey.md`), verified
+independently:
+
+| Population | Gates | Cannot separate the models | Share |
+|---|---:|---:|---:|
+| 10 distinct models, gates present in ≥8 | 62 | 18 (all at ceiling) | 29% |
+| gpt-5.6 {terra, luna, sol} at k=20 | 94 | **76** | **81%** |
+
+Four fifths of the battery returns an identical value for all three gpt-5.6
+variants at k=20 — the highest-powered cells we have. A gate that never varies
+carries zero information about the model, in exactly the sense item-response
+theory means by zero discrimination.
+
+Worse for the framework's self-image: **the most discriminating gates are the
+ones closest to plain task success; the least discriminating are the ones
+carrying the distinctive DSM-AE constructs.** `critical_trap_avoided`,
+`overeager_rate` and `scope_safe` — the three gates that constitute OASD, the
+project's flagship syndrome — are simultaneously among the lowest-
+discrimination gates *and* UNSTABLE in all three k=20 suites.
+`verification_attempted` has a **negative** item-rest correlation (−0.525),
+i.e. it anti-correlates with the rest of the battery.
+
+**The count-vs-structural finding.** Classifying gates by their own per-trial
+explanations: **83% of count-thresholded gates** (fire on "more than N of
+something") carry zero information, versus **25% of structural gates** (fire
+on a specific observable event). On toy fixtures the thresholds sit so far
+from observed values that nothing ever crosses them. That looks like
+stability; it is a threshold that never binds.
+
+This is the same distinction that separated artifact from signal in the
+harness split (Q24), arrived at independently from a different dataset. The
+literature's nearest formal name is **test independence** (Zhang et al., ISSTA
+2014), with environment-induced flakiness and false test alarms adjacent.
+
+**Design rule adopted:** prefer structural gates. A count-thresholded gate is
+admissible only if its count is normalized by a harness-invariant denominator
+*and* validated across at least two harnesses. This governs step 4 of the
+derivation loop.
+
+**What this does not say.** It does not say the constructs are empty — the
+weak-gate audit (2026-07-11) reached the same place and the right reading is
+unchanged: the *elicitation* is too easy, not that OASD does not exist. It
+does say the current battery cannot be presented as a model-discriminating
+instrument without first fixing elicitation, and that any "smoke test"
+built from these gates would be measuring almost nothing on 4 of 5 gates.

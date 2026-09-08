@@ -330,6 +330,69 @@ run them alongside Phase A rather than waiting for Phase C.
 
 ---
 
+## 7b. UPDATE 2026-09-08 (evening): what the survey and the corrections changed
+
+Two workstreams landed after this plan was written and both cut against it.
+Recording the delta rather than editing the plan silently.
+
+### The literature verdict: triage, not substitute
+
+The smoke-test survey (65 verified sources,
+`2026-09-08-smoke-test-criteria-survey.md`) returns **partial support for the
+weak claim, substantial damage to the strong one**:
+
+- **The industrial literature says smoke tests *triage*, they do not
+  substitute.** This is the single most important framing correction
+  available, and it is good news: the triage claim is defensible *today* on
+  cost alone and clears a far lower evidentiary bar than substitution. §6's
+  three-part answer should lead with triage, not prediction.
+- **Efficient-eval prior art proves the technique and names our missing
+  precondition.** tinyBenchmarks (100 of 14K MMLU), Anchor Points, Sort &
+  Search all fit item parameters on large pools of *already-evaluated models*
+  — 87, ~100, 31,000 respectively. **We have 10 models and zero verified
+  pack↔task identity joins.** The prior art tells us what to collect; it does
+  not tell us we have it.
+- **Rothermel's reduction negative result reproduces on our own suite.**
+  Answer to "how far can it be pared down": **not to 5, not to 10; ~15-20 of
+  62** — and that is measured against our own suite mean on n=7 with CIs
+  including zero.
+- **Ruan/Maddison/Hashimoto (arXiv 2405.10938)** is the closest external
+  support: agentic performance *is* predictable from simpler non-agentic
+  benchmarks. It also needs ~100 models and predicts from established
+  benchmark scores, not a bespoke toy suite.
+- **Shield 1 is narrower than §1 claims.** Coverage/revalidation defends
+  *construct validity* — that these capabilities matter — not *instrument
+  quality*. The blog currently conflates them. Separate them explicitly.
+
+### The discrimination result changes the priority order
+
+**81% of gates cannot separate terra from luna from sol at k=20** (Q25;
+verified independently). The OASD gates are simultaneously lowest-
+discrimination and UNSTABLE. 83% of count-thresholded gates carry zero
+information versus 25% of structural ones.
+
+Combined with Q24 (zero instruments survive scaffold + clustering), the
+honest position is: **the current battery is not yet a smoke test, and the
+blocking problem is elicitation, not analysis.** No amount of further
+statistics on these gates will produce discrimination that the gates do not
+have.
+
+### Revised priorities
+
+| Was | Now |
+|---|---|
+| B: pack↔task correlation | **Blocked** — n=10, no verified identity join. Do not attempt. |
+| C1: literature survey | **Done** (65 sources) |
+| C3/C4: statistics | **Done** — and they removed every finding |
+| — | **NEW P0: fix elicitation.** Gates that never vary cannot be smoke tests. Target the 18 ceiling gates and the 76 flat gpt-5.6 gates. |
+| — | **NEW P1: mutation-style adequacy check.** Take a model or scaffold known deficient in capability X; confirm the pack for X fires. No benchmark runs. Cheapest thing that moves the verdict. |
+| — | **NEW P2: structural-gate rule.** Prefer structural; a count gate needs a harness-invariant denominator and cross-harness validation. |
+
+P1 is the highest value-per-hour item in the whole plan: it directly answers
+"does this detect the gap" and needs no new benchmark runs.
+
+---
+
 ## 8. What this plan does not fix
 
 - **Go/JavaScript are unmeasurable on the DGX** (QEMU). Reproducible on x86;
