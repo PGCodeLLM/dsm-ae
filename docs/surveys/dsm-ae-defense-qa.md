@@ -1017,3 +1017,65 @@ unchanged: the *elicitation* is too easy, not that OASD does not exist. It
 does say the current battery cannot be presented as a model-discriminating
 instrument without first fixing elicitation, and that any "smoke test"
 built from these gates would be measuring almost nothing on 4 of 5 gates.
+
+### Q26. Is there any signal at the metric level, or did the corrections kill everything?
+
+**There is signal — but it is in a *continuous* trace feature, not in any
+binary gate, and it is weak.** This is the answer to "did you check anything
+besides the 12 instruments?"
+
+**First, the scope of what was actually tested.** The mapping tests **12
+off-policy instruments**, not the 94 pack gates. That is not an oversight: ~29
+of 94 gates are fixture-bound by construction (`distractor_resisted`,
+`consulted_new_regime_docs`, `handoff_artifact_written`, the `tier1/2/3`
+erosion variants), and most of the rest assume a toy answer key. They cannot
+be scored on a real repository trace at all. **Only the 12 transferred.** Any
+claim about "the packs predicting task outcomes" is therefore a claim about 12
+structural instruments, never about the battery.
+
+**Second, what a continuous scan finds.** Point-biserial correlation of
+per-trial trace features against failure, computed within each harness:
+
+| Feature | claude-code (n=608) | opencode (n=652) |
+|---|---:|---:|
+| trace length (`n_calls`) | +0.221 | +0.160 |
+| steps | +0.237 | +0.159 |
+| completion tokens | — (not recorded) | +0.212 |
+| distinct files touched | −0.033 | +0.163 |
+| **fraction search** | **−0.156** | **−0.089** |
+| fraction edit | −0.002 | −0.002 |
+
+Two things replicate across *both* harnesses, which is the bar the binary
+instruments failed:
+
+1. **Longer traces fail more.** AUC 0.636 [0.593, 0.680] on claude-code and
+   0.605 [0.561, 0.650] on opencode — **cluster-bootstrap CIs (resampling
+   instances), both excluding 0.5.** It also holds *within* every language
+   with enough data (python 0.571/0.596, go 0.683/0.618, typescript
+   0.685/0.616), so it is not the ecosystem confound.
+2. **Searching proportionally more is associated with success** in both
+   harnesses. Small, but same sign.
+
+**Why this is honest and still nearly useless as stated.** AUC ≈ 0.62 is weak
+— better than chance, far from a decision rule. More importantly, *trace
+length is endogenous*: an agent that is failing keeps trying, so length is
+plausibly a consequence of difficulty rather than a cause of failure. This is
+the same over-adjustment trap recorded in Q16, arriving from the other
+direction. It is a **correlate**, and honest framing is "long traces are a
+cheap distress signal," not "verbosity causes failure."
+
+**Why it still matters for the smoke-test reframe.** It is the first thing in
+this corpus that (a) replicates across two scaffolds, (b) survives
+cluster-robust CIs, and (c) holds within language. Compare the binary
+instruments, where *none* did. And it is directly actionable: trace length is
+free to compute, harness-agnostic in *sign* if not magnitude, and needs no
+fixture. That is exactly the shape of thing a triage indicator should be.
+
+**Design consequence.** The battery is built almost entirely from **binary
+threshold gates**, and Q25 shows 83% of count-thresholded gates carry zero
+information while thresholds sit far from observed values. The one thing with
+replicable signal here is a **continuous, unthresholded** quantity. That
+suggests the gate design — not just the elicitation — is part of the problem:
+thresholding discards the ordering information that carries the signal.
+Prefer continuous scores with reported distributions over pass/fail gates
+wherever the underlying quantity is ordinal.
