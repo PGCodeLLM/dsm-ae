@@ -329,7 +329,9 @@ def render_markdown(
     blocks: list[tuple[str, int, int, list[Association]]],
     lang_table: dict[str, dict[str, Counter]],
     excluded: Counter | None = None,
+    instance_counts: dict[str, int] | None = None,
 ) -> str:
+    instance_counts = instance_counts or {}
     out: list[str] = []
     out.append("# Behaviour → task-outcome mapping\n")
     out.append(
@@ -358,6 +360,17 @@ def render_markdown(
     for title, n_pass, n_fail, assocs in blocks:
         out.append(f"\n## {title}\n")
         out.append(f"n = {n_pass + n_fail} ({n_pass} pass / {n_fail} fail)\n")
+        n_inst = instance_counts.get(title)
+        if n_inst:
+            ratio = (n_pass + n_fail) / n_inst
+            out.append(
+                f"\n> These are **{n_pass + n_fail} model-attempts** over "
+                f"**{n_inst} distinct instances** ({ratio:.2f} attempts each).\n"
+                "> Attempts on the same instance are correlated, so the effective\n"
+                "> sample is smaller than `n` and the p-values below are\n"
+                "> anti-conservative. Point estimates are unaffected. See defense\n"
+                "> Q/A Q23.\n"
+            )
         if not assocs:
             out.append("\n_No labelled trials._\n")
             continue
@@ -478,6 +491,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             print(f"   {v:5d}  {k}")
 
     blocks: list[tuple[str, int, int, list[Association]]] = []
+    instance_counts: dict[str, int] = {}
     payload: dict[str, object] = {"sources": {}}
 
     for source, trials in sorted(by_source.items()):
@@ -489,10 +503,14 @@ def main(argv: Sequence[str] | None = None) -> int:
         assocs = associate(labelled, scores)
         n_pass = sum(1 for t in labelled if t.success)
         n_fail = len(labelled) - n_pass
+        # Distinct upstream instances: each is typically attempted by more than
+        # one model, so `n` overstates the independent sample (Q23).
+        instance_counts[source] = len({t.task_name for t in labelled if t.task_name})
         blocks.append((source, n_pass, n_fail, assocs))
         payload["sources"][source] = {  # type: ignore[index]
             "n_pass": n_pass,
             "n_fail": n_fail,
+            "n_instances": instance_counts[source],
             "associations": [asdict(a) for a in assocs],
         }
 
@@ -509,7 +527,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     args.out.parent.mkdir(parents=True, exist_ok=True)
     args.out.write_text(json.dumps(payload, indent=2))
     args.md.parent.mkdir(parents=True, exist_ok=True)
-    args.md.write_text(render_markdown(blocks, lang_table, excluded))
+    args.md.write_text(render_markdown(blocks, lang_table, excluded, instance_counts))
     print(f"wrote {args.out} and {args.md}")
     return 0
 
