@@ -1215,3 +1215,284 @@ about the *corpus*. It was actually a fact about the *failure mode*, and
 reading it narrowly is what let the too-strong containment claim survive as
 long as it did. A counterexample to a claim is worth more attention than a
 tally of confirmations.
+
+## 21. Post-recovery check: the re-run cost is real, but the data is not double-counted
+
+The recovery used **option 2** (new `job_name`, same `jobs_dir`), which worked:
+all 48 pre-switch rewards survive and the nogo jobs are producing new ones
+(68 total). Two things worth knowing about the resulting run directory:
+
+### Duplicate trial names are expected, and harmless to the statistics
+`runs/` now holds **92 trial dirs under 72 unique names**: 20 trials appear in
+both an original `swebenchpro-gpt56*` job and a `swebenchpro-nogo-gpt56*` job,
+because Harbor's skip logic is per-`job_name` and the new name starts an empty
+slate.
+
+Checked rather than assumed -- **no trial has two reward files**:
+
+```
+duplicated trial names        20
+trials with two rewards        0
+reward in original job only   20
+reward in nogo job only        0
+```
+
+So the per-language means are not inflated by counting a trial twice. The nogo
+copies are re-attempts still in progress; if any of them completes, that name
+*will* hold two rewards and the mean would double-count. Worth re-checking
+before publishing any final number:
+
+```bash
+find runs -maxdepth 3 -path "*/verifier/reward.txt" | sed 's|.*/\([^/]*\)/verifier.*|\1|' \
+  | sort | uniq -d        # should print nothing
+```
+
+### The cost of option 2, quantified
+All 20 duplicated trials already had a reward in the original job. The nogo jobs
+are therefore re-running ~20 trials of already-successful work -- the re-run cost
+I flagged when proposing the option, now measured rather than estimated. Against
+the ~8 h of Go trials the switch avoids it is still the right trade, but it is
+not free.
+
+### `GRADER_NAME_MISMATCH` growth is not a spreading defect
+The count went 2 -> 4, but all four trials are the **same task**
+(`instance_tutao__tutanota-5181821...`) re-attempted in the nogo jobs. The
+section 15 finding stands: exactly one task of the 43 is affected.
+
+## 22. End-to-end retrieval VERIFIED (pull -> adapter, no code changes)
+
+Tested the actual deliverable rather than assuming it, using a finished job:
+
+```bash
+./scripts/dgx/pull_results.sh                        # lists all 6 job dirs,
+                                                     # incl. the new -nogo- ones
+./scripts/dgx/pull_results.sh nl2repobench-gpt56terra # -> 11 MB tar.gz
+```
+
+Extracted and fed to the real adapter (`src/dsm_ae/harbor/adapter.py`,
+untouched):
+
+```
+load_run(...) -> 4 trials
+  mootdx__A4Ffnfq     reward=0.657143  tools=33  lang=python
+  paillier__9PjvQko   reward=1.0       tools=37  lang=python
+  sklearn__JbWdoFH    reward=0.985714  tools=26  lang=python
+  stamina__raj93bQ    reward=0.983871  tools=26  lang=python
+```
+
+Rewards, tool-call extraction and language tagging all come through correctly,
+so the DGX output layout is adapter-compatible with no code changes -- the
+original requirement.
+
+### Caveat: the adapter silently skips incomplete trials
+Of the 10 instance dirs in that bundle, only 4 carry the full
+`agent/trajectory.json` + `verifier/reward.txt` + `result.json` trio:
+
+```
+4 dirs  all three files          -> loaded
+1 dir   reward + result, no traj -> skipped
+5 dirs  result.json only         -> skipped
+```
+
+`load_run` yields 4 and says nothing about the other 6. That is reasonable
+behaviour, but it means **`len(load_run(...))` is not the trial count** -- a
+run whose agents all failed setup would load as an empty, entirely healthy-
+looking corpus. Always cross-check against `triage_rewards.py`, which counts
+every trial dir and names the reason each one is missing.
+
+The 6 skipped here are the known APT_404 (agent never ran, so no trajectory)
+and casing-bug trials -- consistent with section 13's accounting, not new loss.
+
+## 23. TypeScript is measurable -- second language unblocked
+
+After many cycles of TS being lost to one-off artifacts, two TS trials scored
+genuinely:
+
+```
+GENUINE_PASS  typescript  1.0000  8 tests  instance_protonmail__webclients__L2FDXk9  (luna)
+GENUINE_PASS  typescript  1.0000  8 tests  instance_protonmail__webclients__L8U7f5a  (terra)
+```
+
+Both really executed 8 tests and passed, so TypeScript joins Python as
+measurable on this hardware. That settles the open question from sections 15
+and 20: TS was never systematically blocked -- it was under-sampled and unlucky.
+
+**Do not read `typescript n=2 mean=1.000` as "TS success rate is 100%".** Both
+rows are the *same task* (`protonmail/webclients-d3e51...`) run on the two
+models -- one instance, not two. n=2 here means two model-attempts at a single
+problem, which says nothing about TS difficulty in general. The same caveat
+applies to every early per-language mean in these runs, Python's included: the
+denominator counts model-attempts, and instances are heavily repeated across
+the two models.
+
+Language status:
+
+```
+python       n=41  mean=0.763   measurable
+typescript   n= 2  mean=1.000   measurable (1 distinct instance)
+javascript   blocked            redis-server segfault under qemu (section 20)
+go           blocked            Go runtime crash under qemu (sections 9, 15)
+```
+
+So the final study covers **2 of 4 languages** on this hardware. Python and
+TypeScript are real; Go and JavaScript need a genuine x86_64 host. That is a
+larger gap than the original "defer Go" decision assumed -- JavaScript was
+expected to work and does not.
+
+## 24. Report distinct instances, not attempts (the n= in these tables is inflated)
+
+`triage_rewards.py` reports `n=` as **model-attempts**, and every instance is
+attempted by both models (plus any Harbor retries and the ~20 nogo re-runs from
+section 21). So the headline n roughly doubles the real sample size:
+
+```
+lang         attempts   distinct instances
+python             43                   13
+typescript          2                    1
+```
+
+Python's `n=43` is **13 distinct problems**, not 43 independent observations.
+Anything published from these runs should quote distinct instances, or state
+explicitly that n counts attempts -- otherwise the sample looks 3x stronger
+than it is. (13 instances is also well under the 26 Python instances sampled,
+i.e. Python itself is only about half-covered so far.)
+
+### A caution about ad-hoc recomputation
+While checking this I wrote a quick script to aggregate rewards directly from
+`reward.txt`, and it produced `typescript: 6 attempts, mean 0.333` against the
+triage's `n=2 mean=1.000`. **The triage was right and the ad-hoc script was
+wrong**: it counted the four `tutao-5181821` trials, which have a reward of 0
+but are quarantined as `GRADER_NAME_MISMATCH` -- their tests *passed* and the
+grader could not match the assertion-count-bearing name (section 15).
+
+The lesson is that a reward file alone does not mean a trial is scoreable.
+Every artifact rule in `triage_rewards.py` exists because some trial's reward
+is misleading; bypassing it to "just average the rewards" silently reintroduces
+exactly the artifacts this whole exercise was set up to exclude. Use
+`triage_rewards.py` as the single source of truth, and extend it rather than
+recomputing alongside it.
+
+## 25. FINAL STATE: DGX rebooted, runs stopped, all data preserved
+
+At **17:38 the DGX rebooted** (`last reboot`: Tue Sep 8 17:38; uptime 27 min at
+time of check). That killed the tmux server and both nogo jobs. This was **not**
+a harness failure -- the jobs were healthy and had been running ~15.5 h.
+
+Evidence they were killed rather than finishing: job-level `result.json` has
+`finished_at: None`, and `logs/swebenchpro-nogo-*.log` are 0 bytes (the tmux
+panes died with the server before flushing).
+
+**No data was lost. Rewards grew 68 -> 111:**
+
+```
+nl2repobench-gpt56luna         5     swebenchpro-nogo-gpt56luna    32
+nl2repobench-gpt56terra        5     swebenchpro-nogo-gpt56terra   31
+swebenchpro-gpt56luna         19
+swebenchpro-gpt56terra        19     total                        111
+```
+
+### Final measured results
+
+```
+python       n=63 attempts   instances=18   mean=0.766
+typescript   n=11 attempts   instances= 6   mean=0.455
+javascript   blocked -- redis-server segfault under qemu
+go           blocked -- Go runtime crash under qemu
+```
+
+TypeScript is now a real result rather than a single lucky instance: 6 distinct
+problems, mean 0.455, clearly separated from Python's 0.766. Whether that gap is
+a genuine language effect or sampling noise at n=6 is a question for the
+analysis, not for this harness work -- but the two languages are now
+independently measurable, which was the point.
+
+### Artifact census (final)
+
+```
+GENUINE_PASS   54     ARTIFACT_NO_TESTS_RAN            16   (go)
+GENUINE_FAIL   20     ARTIFACT_APT_404                 10
+INCOMPLETE      8     ARTIFACT_QEMU_SIGNAL              6   (nodebb/redis)
+                      ARTIFACT_MODEL_QUOTA_429          5
+                      ARTIFACT_AGENT_OOM_KILLED         4
+                      ARTIFACT_GRADER_NAME_MISMATCH     4   (1 task)
+                      ARTIFACT_TIMEOUT_BUDGET_TOO_SMALL 3
+                      ARTIFACT_RuntimeError             2
+                      ARTIFACT_AGENT_NEVER_STARTED      1
+```
+
+74 of 125 trials are scoreable; every excluded trial has a named, diagnosed
+cause. Nothing is quarantined as "unexplained".
+
+### To resume (needs a decision -- NOT actioned)
+
+The jobs would restart cleanly: Harbor skips completed trials within the same
+`job_name`, and the configs are unchanged since the reboot, so
+`~/dsm-dgx/launch_runs.sh swebenchpro-nogo-terra swebenchpro-nogo-luna` (with
+the nogo config names) would resume from 111 rewards rather than restart. About
+10 of 43 nogo tasks per model remain unattempted.
+
+Note the reboot also cleared the `qemu-x86_64` binfmt registration -- **that must
+be reinstalled before any resume**, or every amd64 task will fail with
+`exec format error`:
+
+```bash
+docker run --privileged --rm tonistiigi/binfmt:latest --install amd64
+```
+
+
+### Problem 20: post-reboot — AppArmor is the only real blocker, not binfmt
+
+The DGX rebooted ~17:38 (uptime confirmed), killing both nogo jobs after
+~15.5h of clean running. No data lost: 111 rewards / 109 trajectories on disk,
+terra 31/43 and luna 32/43.
+
+Two symptoms appeared, and it is worth separating them because the obvious
+reading is wrong:
+
+```
+/proc/sys/fs/binfmt_misc/   -> 0 entries      (looks like emulation is gone)
+mount | grep binfmt_misc    -> not mounted
+docker run --platform=linux/amd64 alpine  -> fails
+```
+
+The failure message is **not** `exec format error`. It is:
+
+```
+Could not check if docker-default AppArmor profile was loaded:
+open /sys/kernel/security/apparmor/profiles: no such file or directory
+```
+
+`securityfs` is not mounted after the reboot, so Docker cannot load its default
+profile and **no container starts at all** — emulated or native. The empty
+`binfmt_misc` directory is a red herring: it lives under the same unmounted
+filesystem, and emulation is in fact fine. Proof, on the rebooted host:
+
+```
+docker run --rm --security-opt apparmor=unconfined --platform=linux/amd64 \
+  alpine uname -m
+-> x86_64
+```
+
+So there is exactly **one** blocker. Reinstalling binfmt
+(`tonistiigi/binfmt --install amd64`) is harmless but does not fix anything,
+and reporting "binfmt is gone, reinstall it" would have sent the next person
+down the wrong path.
+
+**Fix requires root** (`sudo` is not passwordless here, `/etc/docker/daemon.json`
+is not writable, and Harbor never sets `security_opt` so there is no
+config hook):
+
+```bash
+sudo mount -t securityfs securityfs /sys/kernel/security
+sudo systemctl restart docker
+```
+
+Resume is otherwise clean — Harbor skips completed trials under the same
+`job_name`, so a relaunch continues from 111 rewards. ~10 of 43 nogo tasks
+remain per model.
+
+**Method note.** Two failing checks pointed at emulation; one passing check
+(the same run with AppArmor bypassed) identified the real cause. When several
+symptoms appear together after an environment change, the discriminating test
+is the one that *isolates* a single variable, not the one that confirms the
+most symptoms.
