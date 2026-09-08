@@ -1119,3 +1119,99 @@ relaunched -> 12 trial dirs each, 10 rewards each preserved
 Harbor added new trials alongside the seeded ones rather than restarting them,
 confirming the seeding held. Jobs launched with `nohup` from outside any tmux
 session this time, so no gate script's exit can orphan them.
+
+## 20. Go containment BROKEN -- nodebb (JavaScript) also unmeasurable
+
+I asserted several times that every zero-test trial was Go. **That is no longer
+true**, and the earlier claim should be treated as scoped to the data available
+at the time, not a property of the benchmark.
+
+Four `nodebb` (JavaScript) trials are now `ARTIFACT_NO_TESTS_RAN`. The cause is
+the same emulator class as Go, but a different victim:
+
+```
+verifier/run-script-stderr.txt:
+qemu: uncaught target signal 11 (Segmentation fault) - core dumped
+/tests/run_script.sh: line 4: 5999 Segmentation fault (core dumped) \
+    redis-server --daemonize yes --protected-mode no --appendonly yes
+cp: cannot stat '/tmp/test/.': No such file or directory
+```
+
+`redis-server` segfaults under `qemu-x86_64`, so NodeBB's test harness never
+starts. `run-script-stdout.txt` is **68 bytes** -- the runner announces
+"Running selected tests: test/i18n.js test/user.js test/messaging.js" and
+produces nothing more. The verifier then reports `Required tests: 3510,
+Passed tests: 0`.
+
+This is **not** a collection error (the section 16 guard correctly does not
+rescue it) and **not** a JavaScript weakness. It is a service dependency dying
+under emulation, exactly parallel to the Go runtime crashing.
+
+### What this changes
+
+- The emulation problem is **not Go-specific**. It affects any task whose
+  verifier needs a native binary that QEMU mishandles -- Go's runtime,
+  `redis-server`, and plausibly other services (postgres, mongo) in tasks not
+  yet reached.
+- The Go-free dataset does **not** make everything measurable. `nodebb` is in
+  the 43-task nogo set and still yields nothing: 4 of its 4 sampled instances x
+  2 models are lost.
+- Practical rule: `NO_TESTS_RAN` + a `qemu: uncaught target signal` in
+  `run-script-stderr.txt` = emulator artifact, regardless of language. Worth
+  checking stderr for that string before attributing any zero-test result.
+
+### Current language picture
+
+```
+python       n=39  mean=0.776   measurable
+javascript   0 usable           nodebb blocked by redis segfault
+typescript   0 usable           6 INCOMPLETE (in flight), 4 lost to assorted artifacts
+go           0 usable           runtime crash (sections 9, 15)
+```
+
+TypeScript is still the open question: it has never been blocked by a
+*systematic* cause, only by four different one-off artifacts, and six trials
+are currently in flight. If those land, TS becomes the second measurable
+language.
+
+
+### Problem 19: the emulation defect is not Go-specific — retraction
+
+Earlier notes here (and several status reports) asserted that every zero-test
+trial was Go, and treated "Go containment" as established. **That was wrong.**
+
+Four **nodebb (JavaScript)** trials produce `tests=0` because `redis-server`
+segfaults under QEMU before NodeBB's harness starts:
+
+```
+qemu: uncaught target signal 11 (Segmentation fault) - core dumped
+/tests/run_script.sh: line 4: 5999 Segmentation fault (core dumped) \
+    redis-server --daemonize yes --protected-mode no --appendonly yes
+```
+
+Verified: all 4 have `reward=0`, `tests=0`, and the qemu signature in the
+verifier output. `run-script-stdout.txt` is 68 bytes, then silence; the
+verifier reports `Required tests: 3510, Passed: 0`.
+
+**What this changes:**
+
+1. The defect is **any task whose verifier needs a native binary QEMU
+   mishandles** — the Go runtime, `redis-server`, plausibly postgres/mongo in
+   tasks not yet reached. Language was a proxy, not the mechanism.
+2. **The Go-free dataset does not make everything measurable.** nodebb is 4 of
+   the 43 nogo tasks (~9%), so the switch's benefit is smaller than the
+   estimate used to justify it. It still avoided ~8h of Go spend; it does not
+   deliver a fully measurable remainder.
+3. JavaScript joins Go as unmeasurable on this hardware, leaving Python
+   confirmed and TypeScript the open question.
+
+`ARTIFACT_QEMU_SIGNAL` now detects this by stderr signature rather than by
+language, so a future victim (postgres, mongo) is caught without anyone
+re-deriving the pattern.
+
+**Method note.** The reference corpus had already shown zero-test trials in
+TypeScript and Python, not just Go — that was flagged and recorded as a fact
+about the *corpus*. It was actually a fact about the *failure mode*, and
+reading it narrowly is what let the too-strong containment claim survive as
+long as it did. A counterexample to a claim is worth more attention than a
+tally of confirmations.
