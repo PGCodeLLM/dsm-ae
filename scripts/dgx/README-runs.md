@@ -950,3 +950,172 @@ The 2MB cap also keeps the check cheap when a transcript is enormous.
 **Lesson:** a heuristic that stands in for "how much work would be lost" must
 be robust to output that is large but worthless. Prefer a bounded, filtered
 measurement over a raw size whenever an agent controls what lands in the file.
+
+## 18. Agent behaviour worth instrumenting: self-inflicted context destruction
+
+Found by the parent session while fixing its drain gate, verified here.
+
+Trial `instance_internetarchive__openli__3VLU8dC` grew `agent/opencode.txt` to
+**199,405,070 bytes (~199 MB)** at roughly 25 MB/min by `cat`-ing a compiled
+binary into its own transcript. About a third of the tail is non-printable
+x86: a 2 MB tail contains only **1,360,406 printable bytes**.
+
+This is an *agent* failure mode, not infrastructure: the agent destroys its own
+context and burns tokens by dumping a build artifact. No current DSM-AE
+instrument detects it, though it sits near the `thrash_edit` / `read_loop`
+family. A candidate signal is cheap and specific:
+
+    non-printable ratio of a bounded tail of agent output, or
+    per-step observation growth rate (bytes/min) far above the session median
+
+Two things make it more interesting, both checked here rather than assumed:
+
+1. **It still scored `reward=1`.** The agent recovered and solved the task. So
+   this behaviour is *not* visible in the outcome oracle at all -- exactly the
+   kind of behavioural deficit that a task-success metric cannot see, which is
+   the premise of the behaviour->task mapping.
+2. **It does not contaminate the ATIF artifact.** `trajectory.json` is
+   **108 KB**, well-formed `ATIF-v1.7`, 15 steps, largest step 43 KB. The dump
+   lives only in the raw `opencode.txt` stream. So `src/dsm_ae/harbor/` ingests
+   this trial normally and the corpus is not polluted -- but equally, **an
+   instrument reading only `trajectory.json` can never detect this behaviour**.
+   Catching it requires looking at the raw agent stream.
+
+### Correction to section 17's monitoring note
+I described the v2 gate as having "died silently". It did not die -- the parent
+session **killed it deliberately** because its condition was unreachable: it
+waited for live trials to reach zero, but with ~50 tasks still queued Harbor
+backfills as soon as one finishes, so the count oscillates (4->3->4 in its own
+log) and never settles. Harbor exposes no graceful-stop flag. The observable
+symptom (a gate that can never fire) was real and worth flagging; the cause was
+a deliberate kill, not a crash.
+
+v3 replaces the unreachable "zero live trials" condition with a **low-water
+mark**: switch once the most-advanced live trial holds <= 20 KB of *printable*
+agent output, capped at 90 min. Measuring printable bytes over a bounded 2 MB
+tail rather than raw file size is what stops the 199 MB binary-dump trial from
+pinning the gate open forever (198,544,910 B -> 1,360,406 B on the same
+instant).
+
+**Verified:** Harbor does re-queue interrupted trials, so the deadline path is
+safe. The two protonmail trials killed in the v1 episode reappeared as fresh
+attempts (`kJq8BYM`, `WPXbubJ`), both progressing. Re-queueing preserves the
+*task*, not the *outcome* -- a retried trial can still fail for its own reasons.
+
+## 19. THE SWITCH FIRED AND THE RUN IS DOWN (needs a decision)
+
+At 09:40 the v3 gate hit its 45-minute cap and switched. The relaunch **failed**
+and **all four benchmark jobs are now stopped**. No data was lost, but nothing
+is running.
+
+### What happened
+
+```
+09:40 waited 45m (peak 585844B); switching anyway
+09:40 stopping swebenchpro sessions
+09:41 repointing configs at swebenchpro-nogo
+09:41 relaunching ... LAUNCHED both sessions
+09:41 post-relaunch: sessions=0 harbor_procs=1
+```
+
+Both relaunched jobs died within a second:
+
+```
+FileExistsError: Job directory /home/bmc/dsm-dgx/runs/swebenchpro-gpt56terra
+already exists and cannot be resumed with a different config.
+```
+
+Confirmed in `harbor/job.py:248-257`: on resume Harbor compares the **entire
+stored JobConfig** to the new one and refuses on *any* difference.
+
+### The assumption that broke
+
+The switch plan rested on "Harbor skips completed trials in the same
+`jobs_dir`, so the existing rewards survive". That is true **only when the
+config is byte-identical**. Changing `datasets[].path` from `swebenchpro` to
+`swebenchpro-nogo` is exactly the kind of change it rejects -- so resuming into
+the same `jobs_dir` with the new dataset can never work. The reuse that made
+the switch cheap is the same mechanism that forbids it.
+
+The tmux server is also gone entirely (`no server running`), so the NL2Repo
+sessions went with it; those two jobs had already finished, so nothing was lost
+there.
+
+### State: data intact, nothing running
+
+```
+48 reward.txt preserved   nl2repo luna 5, terra 5; swebenchpro luna 19, terra 19
+python n=24 mean=0.803    unchanged by the failure
+4 orphaned env containers still up
+tmux sessions: none       harbor processes: 0
+```
+
+### Options (NOT actioned -- reporting only)
+
+1. **New `jobs_dir` for the nogo run** (e.g. `runs-nogo/`). Cleanest: leaves the
+   48 existing rewards untouched and lets the 43 non-Go tasks run under a config
+   Harbor accepts. Cost: the ~19 non-Go trials already completed would be re-run,
+   since the skip logic is per-`jobs_dir`.
+2. **New `job_name`** (e.g. `swebenchpro-nogo-gpt56terra`) with the same
+   `jobs_dir`. Harbor keys the directory off `job_name`, so this sidesteps the
+   config comparison while keeping everything under `runs/`. Same re-run cost.
+3. **Revert the configs to `datasets/swebenchpro`** and relaunch unchanged. The
+   original jobs would resume and skip completed trials -- but that undoes the
+   approved Go-free switch and resumes burning Go trials.
+
+Option 2 looks best: it preserves the existing rewards, satisfies Harbor's
+constraint, and keeps the approved Go-free scope. The re-run cost is real but
+small next to the ~8h of Go work the switch avoids.
+
+
+### Problem 18: Harbor cannot resume a job dir under a changed config
+
+The Go switch fired at 09:41, repointed the configs, and relaunched — and both
+jobs died in under a second:
+
+```
+FileExistsError: Job directory .../runs/swebenchpro-gpt56terra
+already exists and cannot be resumed with a different config.
+```
+
+Source: `harbor/job.py:253` — `if existing_config != self.config: raise
+FileExistsError(...)`. Harbor compares the **entire stored JobConfig** on
+resume and refuses on *any* difference. Repointing `datasets[].path` at
+`swebenchpro-nogo` is exactly such a difference.
+
+**This invalidated the assumption the whole switch plan rested on.** Every
+earlier note here said "Harbor skips completed trials in the same `jobs_dir`,
+so finished work survives the relaunch." That is true *only when the config is
+byte-identical*. The reuse that made the switch look cheap is the same
+mechanism that forbids it. The claim should have been checked against
+`job.py` before the switch was armed, not after it failed.
+
+**Also correcting an earlier diagnosis of mine:** I first attributed this to
+the tmux server dying and taking the jobs with it. Wrong — tmux went down
+*because* both jobs exited immediately; the server had no remaining sessions.
+The dead tmux was a symptom, not the cause.
+
+### Recovery: new job_name + seeded trial dirs
+
+Chosen over a bare new `job_name` (which would re-run ~20 completed non-Go
+trials, ~10h of duplicated agent time) and over reverting the switch (which
+would resume ~8h of unscoreable Go spend).
+
+`reseed_nogo.sh` copies completed **non-Go** trial dirs from
+`runs/swebenchpro-gpt56*` into `runs/swebenchpro-nogo-gpt56*` so Harbor's
+per-trial skip logic finds them. Go trials are deliberately not seeded — they
+are unscoreable here and absent from the nogo dataset. The script is
+idempotent.
+
+Result:
+
+```
+gpt56terra: seeded 10 (Go skipped 9)
+gpt56luna:  seeded 10 (Go skipped 9)
+relaunched -> 12 trial dirs each, 10 rewards each preserved
+             15 harbor procs, both sessions alive
+```
+
+Harbor added new trials alongside the seeded ones rather than restarting them,
+confirming the seeding held. Jobs launched with `nohup` from outside any tmux
+session this time, so no gate script's exit can orphan them.
