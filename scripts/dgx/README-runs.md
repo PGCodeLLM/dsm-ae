@@ -1431,13 +1431,22 @@ The jobs would restart cleanly: Harbor skips completed trials within the same
 the nogo config names) would resume from 111 rewards rather than restart. About
 10 of 43 nogo tasks per model remain unattempted.
 
-Note the reboot also cleared the `qemu-x86_64` binfmt registration -- **that must
-be reinstalled before any resume**, or every amd64 task will fail with
-`exec format error`:
+**Correction on binfmt after reboot.** I initially reported that the reboot
+cleared the `qemu-x86_64` registration, based on
+`/proc/sys/fs/binfmt_misc/` appearing empty over SSH. **That was wrong.** The
+directory is empty *in the SSH session's mount namespace*; the emulator is
+registered and working:
 
-```bash
-docker run --privileged --rm tonistiigi/binfmt:latest --install amd64
 ```
+docker run --rm --privileged tonistiigi/binfmt   -> emulators: [python3.12, qemu-x86_64]
+docker run --rm --platform linux/amd64 alpine uname -m   -> x86_64
+```
+
+Verified against the resumed run: **0 trials with `exec format error`**. So no
+binfmt action is needed after a reboot on this box. The right check is a real
+amd64 `docker run` or the `tonistiigi/binfmt` report -- **not** listing
+`/proc/sys/fs/binfmt_misc/`, which is namespace-dependent and misleads over SSH.
+
 
 
 ### Problem 20: post-reboot — AppArmor is the only real blocker, not binfmt
@@ -1496,3 +1505,53 @@ remain per model.
 symptoms appear together after an environment change, the discriminating test
 is the one that *isolates* a single variable, not the one that confirms the
 most symptoms.
+
+### Problem 21: seeding a job dir cannot survive a dataset change — abandoned
+
+The recovery plan after the reboot was to keep the 63 seeded trial dirs so
+Harbor would skip them. It does not work, and the attempt cost four failed
+relaunches:
+
+1. **Root-owned leftovers** (91 files) from containers the reboot interrupted.
+   Harbor's cleanup of two incomplete trial dirs failed as `bmc`. Cleared with
+   a root container; no completed trial affected.
+2. **`ValueError: Existing trial config does not match planned job config`**
+   (`harbor/job.py:361`) — every *existing* trial must match a *planned* one.
+3. Seeded trials recorded `task path: .../datasets/swebenchpro/...` while the
+   job plans `.../swebenchpro-nogo/...`. Rewrote all 40 stale references —
+   **still failed**, because Harbor compares more of the trial config than the
+   dataset path.
+4. **Abandoned the seeding.** Moved all 63 dirs to
+   `runs/archive-seeded-{terra,luna}` and relaunched clean. Both sessions came
+   up, 15 harbor procs, trials starting.
+
+**Cost, stated plainly:** the ~20 already-completed non-Go trials now re-run —
+about 10 hours. The seeding existed precisely to avoid that, and instead spent
+several relaunch cycles before failing. The general lesson: Harbor's
+per-trial config identity is opaque and strict; **treat a job dir as bound to
+the exact config that created it.** If the config must change, start a new job
+dir and merge results at analysis time, not on disk.
+
+The 111 rewards are intact in the archive and are valid data — they are simply
+invisible to Harbor's skip logic. Merge them when pulling results.
+
+### Correction: binfmt was never cleared by the reboot
+
+An earlier note here (and a status report) claimed the reboot cleared the
+`qemu-x86_64` registration, based on `/proc/sys/fs/binfmt_misc/` appearing
+empty over SSH. **That was wrong.** The directory is empty in the SSH
+session's mount namespace, not on the host:
+
+```
+tonistiigi/binfmt                              -> qemu-x86_64 present
+docker run --platform=linux/amd64 alpine       -> x86_64
+trials failing with "exec format error"        -> 0
+```
+
+The real post-reboot blocker was AppArmor (`securityfs` unmounted), which
+stopped *all* containers, emulated or not. The empty binfmt dir was a
+coincidental symptom that pointed the wrong way.
+
+**Check to use:** a real `docker run --platform=linux/amd64`, or the
+`tonistiigi/binfmt` report — never a listing of `/proc/sys/fs/binfmt_misc/`
+from a remote shell.
