@@ -1555,3 +1555,79 @@ coincidental symptom that pointed the wrong way.
 **Check to use:** a real `docker run --platform=linux/amd64`, or the
 `tonistiigi/binfmt` report — never a listing of `/proc/sys/fs/binfmt_misc/`
 from a remote shell.
+
+## 26. Post-reboot restart: results archived, jobs re-seeded (no data loss)
+
+After the reboot the runs were restarted, and the run directory was
+reorganised at 18:59:
+
+```
+archive-seeded-luna           32 dirs / 32 rewards   <- prior nogo results, preserved
+archive-seeded-terra          31 dirs / 31 rewards
+swebenchpro-nogo-gpt56luna     3 dirs /  1 reward    <- fresh job, restarted
+swebenchpro-nogo-gpt56terra    4 dirs /  2 rewards
+nl2repobench-gpt56{luna,terra} 10 dirs /  5 rewards each
+swebenchpro-gpt56{luna,terra}  23 dirs / 19 rewards each
+                                        ---
+                                        114 total (was 111)
+```
+
+The completed nogo work was moved aside into `archive-seeded-*` rather than
+deleted, so the `swebenchpro-nogo-*` job dirs start near-empty and Harbor
+re-attempts the remaining tasks. Checked, not assumed:
+
+- **rewards went up (111 -> 114)**, so nothing was lost in the move;
+- **0 duplicate rewarded trial names**, so the per-language means are still not
+  double-counted (4 task prefixes appear in both archive and live dirs, but
+  none has two reward files yet);
+- **language stats unchanged** (`python n=63/18 inst`, `typescript n=12/6 inst`),
+  because `triage_rewards.py` globs every directory under `runs/` and does not
+  care about job naming.
+
+**Implication for retrieval:** `pull_results.sh` lists whatever job dirs exist,
+so `archive-seeded-*` will show up alongside the live jobs and must be pulled
+too -- they hold the majority of the SWE-bench-Pro results. Do not assume the
+`swebenchpro-nogo-*` dirs contain the run.
+
+The duplicate-name check remains the thing to re-run before publishing, since
+the archive/live overlap is exactly the situation that could start
+double-counting:
+
+```bash
+find runs -maxdepth 3 -path "*/verifier/reward.txt" \
+  | sed 's|.*/\([^/]*\)/verifier.*|\1|' | sort | uniq -d   # must print nothing
+```
+
+
+### Retrieval: `archive-seeded-*` holds the MAJORITY of SWE-bench-Pro results
+
+After the reboot recovery, the run directories are split:
+
+```
+runs/archive-seeded-terra            31 dirs / 31 rewards   <- prior results
+runs/archive-seeded-luna             32 dirs / 32 rewards   <- prior results
+runs/swebenchpro-nogo-gpt56{terra,luna}   3-4 dirs          <- fresh, restarted
+```
+
+**Anyone pulling only `swebenchpro-nogo-*` gets ~4 trials and will think that
+is the run.** `pull_results.sh` lists whatever job dirs exist, so the archive
+dirs appear alongside the live jobs and **must be pulled too**. This is a
+retrieval hazard, not a data hazard — nothing was lost in the move (reward
+count went 111 -> 114 across the reorganisation).
+
+**Double-counting is handled at ingestion, not here.** Four task prefixes now
+appear in both the archive and the live dirs
+(`instance_ansible__ansible-11c177`, `instance_internetarchive__openli`,
+`instance_protonmail__webclients`, `instance_tutao__tutanota-5181821`), so a
+re-attempted trial completing in the live job could in principle collide with
+its archived copy. `load_run` in `src/dsm_ae/harbor/adapter.py` dedupes by
+`trial_name` and keeps the scoreable copy, so the mapping is safe. Keep the
+shell check as the pre-publication gate anyway — it is cheap and catches the
+condition before the adapter has to resolve it:
+
+```bash
+find runs -maxdepth 3 -path "*/verifier/reward.txt" \
+  | sed 's|.*/\([^/]*\)/verifier.*|\1|' | sort | uniq -d   # must print nothing
+```
+
+Currently clean (verified 2026-09-08 20:55).
