@@ -975,7 +975,9 @@ independently:
 
 | Population | Gates | Cannot separate the models | Share |
 |---|---:|---:|---:|
-| 10 distinct models, gates present in ≥8 | 62 | 18 (all at ceiling) | 29% |
+<!-- n=10: the three gpt-5.6 *-max (k=20) suites supersede the k=3 runs of the
+     same models, so 13 report files reduce to 10 distinct models. -->
+| 10 distinct models, gates common to all | 62 | 19 (all at ceiling) | 31% |
 | gpt-5.6 {terra, luna, sol} at k=20 | 94 | **76** | **81%** |
 
 Four fifths of the battery returns an identical value for all three gpt-5.6
