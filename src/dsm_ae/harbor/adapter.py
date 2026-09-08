@@ -24,7 +24,7 @@ import json
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Iterator
+from typing import Any, Iterable, Iterator
 
 # Repo -> primary language. SWE-bench-Pro spans several ecosystems; language is
 # the main confound to stratify on when asking "is this an agentic deficit or
@@ -327,6 +327,22 @@ def load_trial(inst_dir: Path, *, run: str) -> HarborTrial | None:
 def load_run(run_dir: Path) -> list[HarborTrial]:
     """Load every instance under one extracted run bundle.
 
+    **This is a loader, not a filter.** It returns every trial that has a
+    trajectory, including ones whose reward is an infrastructure artifact
+    (verifier ran zero tests, harness crashed). Averaging `t.reward` over the
+    result is WRONG and skews by language: on the archived corpus it
+    understates Go by 11.7 points and TypeScript by 7.5, while barely moving
+    Python — i.e. it manufactures precisely the language-deficit conclusion
+    this project exists to rule out.
+
+    Filter on `t.success is not None` (equivalently `t.scoreable`) before
+    computing any rate::
+
+        trials = [t for t in load_run(d) if t.success is not None]
+
+    See `HarborTrial.scoreable` for what is excluded and why (defense Q/A
+    Q17-Q21), and `scoreable_only()` for the filtered convenience wrapper.
+
     Deduplicates by **trial name**, not by path. Harbor's skip logic is keyed on
     `job_name`, so relaunching under a new job name (as the Go-free switch did)
     starts an empty slate and re-runs trials the original job already finished.
@@ -350,6 +366,14 @@ def load_run(run_dir: Path) -> list[HarborTrial]:
         if prior is None or (t.scoreable and not prior.scoreable):
             by_name[t.trial_name] = t
     return list(by_name.values())
+
+
+def scoreable_only(trials: Iterable[HarborTrial]) -> list[HarborTrial]:
+    """Trials whose reward actually measures the model.
+
+    Prefer this over raw `load_run` output whenever computing a rate or mean.
+    """
+    return [t for t in trials if t.success is not None]
 
 
 def iter_runs(root: Path) -> Iterator[tuple[str, list[HarborTrial]]]:

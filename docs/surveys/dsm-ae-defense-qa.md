@@ -1079,3 +1079,43 @@ suggests the gate design — not just the elicitation — is part of the problem
 thresholding discards the ordering information that carries the signal.
 Prefer continuous scores with reported distributions over pass/fail gates
 wherever the underlying quantity is ordinal.
+
+### Q27. Does the loader filter artifacts, or does the caller have to?
+
+**The caller has to, and that was an API footgun worth fixing.**
+
+`load_run` returns every trial with a trajectory, including ones whose reward
+is an infrastructure artifact — the verifier ran zero tests, or the harness
+crashed. The exclusion lives on `HarborTrial.scoreable` / `.success`, not in
+the loader. That is the right layering for a loader, but it means
+`mean(t.reward for t in load_run(d))` silently includes artifacts.
+
+The damage is **not** uniform, which is what makes it dangerous:
+
+| Language | naive mean | correct mean | delta |
+|---|---:|---:|---:|
+| go | 0.475 (n=510) | 0.592 (n=404) | **+0.117** |
+| typescript | 0.575 (n=280) | 0.650 (n=243) | **+0.075** |
+| python | 0.632 (n=532) | 0.639 (n=526) | +0.007 |
+| javascript | 0.670 (n=88) | 0.667 (n=87) | −0.004 |
+
+Naive averaging understates Go by 11.7 points and TypeScript by 7.5 while
+barely moving Python — **manufacturing exactly the language-deficit conclusion
+this project exists to rule out.** It is the Q17 error re-entering through a
+different door: not a wrong exclusion rule, but a correct rule that a caller
+can bypass without noticing.
+
+**Fixed** by making the safe path the easy one rather than by documenting a
+convention:
+
+- `load_run`'s docstring now states the hazard with these numbers and shows
+  the filter idiom.
+- `scoreable_only(trials)` is exported alongside `load_run`, so the correct
+  call is one wrapper rather than a remembered predicate.
+
+**Generalizable point.** Q17/Q19/Q20 were all *"the data lies in a way the
+next layer cannot see."* This one is *"the API lets you skip the check that
+catches that."* An analysis pipeline needs both a correct rule and a shape
+that makes bypassing it deliberate. Any bring-your-own-task user calling
+`load_run` directly inherits this, which is why the warning lives in the
+docstring and not only here.

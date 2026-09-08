@@ -15,7 +15,7 @@ Bring-your-own-task: anything that emits an ATIF-style trajectory plus a
 reward can be read by `load_run` and scored by `score_trajectory`.
 """
 
-from .adapter import HarborTrial, iter_runs, load_run
+from .adapter import HarborTrial, iter_runs, load_run, scoreable_only
 from .docker_cleanup import cleanup_docker_for_job
 from .import_rewards import import_harbor_run, reward_dir_to_report
 from .instruments import INSTRUMENTS, score_trajectory
@@ -50,6 +50,7 @@ __all__ = [
     "HarborTrial",
     "load_run",
     "iter_runs",
+    "scoreable_only",
     "score_trajectory",
     "INSTRUMENTS",
 ]
