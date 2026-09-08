@@ -308,19 +308,31 @@ def load_trial(inst_dir: Path, *, run: str) -> HarborTrial | None:
 
 
 def load_run(run_dir: Path) -> list[HarborTrial]:
-    """Load every instance under one extracted run bundle."""
+    """Load every instance under one extracted run bundle.
+
+    Deduplicates by **trial name**, not by path. Harbor's skip logic is keyed on
+    `job_name`, so relaunching under a new job name (as the Go-free switch did)
+    starts an empty slate and re-runs trials the original job already finished.
+    The same `trial_name` then exists in two job directories, and counting both
+    would double-weight that instance in every downstream rate.
+
+    When a name appears twice, the scoreable copy wins; if both are scoreable
+    (or neither is), the first encountered wins. Ordering is made deterministic
+    by sorting the paths, so repeated runs of the mapping agree.
+    """
     run_dir = Path(run_dir)
-    trials: list[HarborTrial] = []
-    seen: set[Path] = set()
-    for res in run_dir.rglob("result.json"):
+    by_name: dict[str, HarborTrial] = {}
+    for res in sorted(run_dir.rglob("result.json")):
         inst = res.parent
-        if inst in seen or not (inst / "agent" / "trajectory.json").exists():
+        if not (inst / "agent" / "trajectory.json").exists():
             continue
-        seen.add(inst)
         t = load_trial(inst, run=run_dir.name)
-        if t is not None:
-            trials.append(t)
-    return trials
+        if t is None:
+            continue
+        prior = by_name.get(t.trial_name)
+        if prior is None or (t.scoreable and not prior.scoreable):
+            by_name[t.trial_name] = t
+    return list(by_name.values())
 
 
 def iter_runs(root: Path) -> Iterator[tuple[str, list[HarborTrial]]]:

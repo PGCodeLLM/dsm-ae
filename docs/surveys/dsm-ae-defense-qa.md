@@ -838,3 +838,52 @@ as a gap rather than quietly added, because it is a reminder that **the
 instrument set is bounded by what the trajectory format happens to record** —
 a limitation that applies to any bring-your-own-task user reading the same
 file.
+
+### Q23. Is n=1260 really 1260 independent observations?
+
+**No. The effective sample size is closer to ~750, and the reported p-values
+are anti-conservative because of it.**
+
+The 1260 scoreable SWE-bench-Pro trials cover only **679 distinct upstream
+instances**: 581 appear twice (once in each archived bundle, under different
+agent harnesses) and 98 appear once. Each trial is a *model-attempt*, not an
+independent problem.
+
+Those pairs are strongly correlated — they are the same task, differing only
+in harness/model:
+
+| | |
+|---|---:|
+| paired instances | 581 |
+| same outcome | 489 (84.2%) |
+| different outcome | 92 (15.8%) |
+
+A crude intra-cluster correlation of ~0.68 gives a design effect of ~1.68, so
+**effective n ≈ 748**. Fisher exact tests over the flat 1260 treat clustered
+observations as independent and therefore understate the p-values. The BH-
+adjusted `q` column inherits the same optimism.
+
+**What this does and does not change.** It does not touch the point estimates
+(`RD`, `RD*`, `RD**`) — those are unbiased under clustering. It affects only
+the precision claims. `test_suppression` at q=0.011 and `premature_stop` at
+q=1.4e-06 have enough margin to survive a ~1.7× variance inflation;
+`destructive_command` (already q=0.058) and anything near the threshold do
+not, and should not be quoted as significant at all.
+
+**Proper fix, not yet run:** cluster-robust inference — a paired/conditional
+test over instances, or a cluster bootstrap resampling *instances* rather than
+trials. Both are computable from existing JSON with no new model calls.
+
+**Related and worse:** the two bundles use **different agent harnesses**
+(opencode 1.18.18 vs claude-code 2.1.207) and different models, and are pooled
+into a single "swebenchpro" block. That is an Axis V violation on the
+project's own terms, and `read_loop` / `thrash_edit` depend on tool-call
+granularity, which differs between harnesses. The paired structure that causes
+the clustering is *also* the scaffold confound — splitting by harness would
+address both at once and is the single highest-value unrun analysis on
+existing data.
+
+**Generalizable point.** A per-language or per-model mean over model-attempts
+invites reading `n` as independent problems. On this corpus that inflates the
+apparent sample by ~1.7×. Any bring-your-own-task user pooling multiple models
+over one instance set inherits exactly this.
