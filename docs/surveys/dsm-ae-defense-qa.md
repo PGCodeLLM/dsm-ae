@@ -887,3 +887,81 @@ existing data.
 invites reading `n` as independent problems. On this corpus that inflates the
 apparent sample by ~1.7×. Any bring-your-own-task user pooling multiple models
 over one instance set inherits exactly this.
+
+### Q24. What survives after the scaffold split and cluster-robust inference?
+
+**Nothing, on this corpus. Stated plainly because it reverses Q23's own
+optimism.**
+
+Two corrections, both computable from existing data, both run 2026-09-08
+(`docs/surveys/2026-09-08-harness-split-and-cluster-robust.md`):
+
+**1. Cluster-robust inference.** Bootstrap resampling *instances*
+(`task_name`) rather than trials. 1260 trials / 679 instances, ICC 0.66,
+design effect 1.57, effective n ≈ 805. (Q23 estimated ICC 0.68 / n≈748 by a
+cruder route; the direction was right, the magnitude slightly off.)
+
+- `test_suppression`: q 0.011 → **0.061**. Q23 asserted it had margin to
+  absorb ~1.7× inflation. **It did not.** Claim withdrawn.
+- `premature_stop`: q 1.4e-06 → 0.002. Survives.
+- `destructive_command`: 0.059 → 0.066. Was never significant; Q23 correct.
+
+**2. Harness split (Axis V).** The two archived bundles run *different agent
+harnesses*, pooled into one block — a scaffold violation on this project's own
+terms:
+
+| Bundle | Harness | Model | n | base fail |
+|---|---|---|---:|---:|
+| ...0901... | opencode 1.18.18 | `openai-compatible/proxy` | 652 | 34.2% |
+| ...0905... | claude-code 2.1.207 | `hosted_vllm/0905_505B_v2_1` | 608 | 40.5% |
+
+The violation is mechanical, not formal. claude-code emits **84.6 tool calls
+per trial vs opencode's 58.9** (1.44×, holding at every quartile: 48/76/115 vs
+36/54/75), with disjoint vocabularies (4121 `TaskUpdate` calls have no
+opencode analogue).
+
+The instruments split exactly along that seam:
+
+| Instrument | claude-code q | opencode q | kind |
+|---|---:|---:|---|
+| `scope_creep` | 0.0043 | 0.069 | count-thresholded |
+| `thrash_edit` | 0.0040 | 0.097 | count-thresholded |
+| `read_loop` | 0.0051 | 0.138 | count-thresholded |
+
+Significant on the harness emitting more calls, not on the other, with RDs
+1.5–1.8× larger. Firing *rates* confirm the mechanism: count-thresholded
+instruments diverge (`read_loop` 58.9% vs 47.7%), structural ones do not
+(`test_suppression` 2.0% vs 1.8%, `premature_stop` 1.2% vs 1.4%). **That is an
+instrument-scale artifact, not a capability difference.**
+
+`premature_stop` survives clustering but not the split: 7 and 9 firings per
+harness, underpowered in both. Its q=1.4e-06 existed only because pooling two
+scaffolds raised n(B) to 16.
+
+**3. The two corrections are the same correction.** Within a harness every
+instance appears exactly once (652×1, 608×1), so design effect = 1.00. The
+clustering *was* the scaffold confound seen from a different angle — the
+pairing existed because each instance was run once per bundle. Splitting
+dissolves it rather than compounding with it.
+
+**Verdict.** Zero instruments have a single-scaffold, cluster-honest,
+multiplicity-corrected association with task failure here. What remains is
+real but weaker: point estimates stable in sign and magnitude across both
+harnesses (`premature_stop` +0.602/+0.667, `test_suppression` +0.267/+0.331),
+i.e. **directional hypotheses awaiting adequate power**, not established
+associations.
+
+**What is needed is not more trials — it is more scaffold-controlled
+instances.** Doubling attempts on the same 679 instances adds almost nothing
+(that is what the ICC says); a single harness over several hundred *distinct*
+instances would settle it.
+
+**Residual confound, not addressed:** harness and model vary together (each
+bundle used a different model), so a per-harness difference could be a model
+difference. Disentangling requires running one model across both harnesses —
+new model calls, not reanalysis.
+
+**Method note.** Every previous correction in this Q/A (Q17, Q19, Q21, Q23)
+tightened an estimate while leaving the headline standing. This one removed
+the headline. That asymmetry is the point: a correction pipeline that never
+costs you a result is not auditing anything.

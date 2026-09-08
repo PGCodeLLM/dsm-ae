@@ -65,6 +65,9 @@ class HarborTrial:
     n_tests_run: int | None = None  # None = verifier output absent/unparsed
     collection_error: bool = False  # suite failed to import -> real model failure
     exception_type: str | None = None  # harness-level failure from result.json
+    agent_name: str = "unknown"  # agent harness, from trajectory.json -> agent.name
+    agent_version: str = ""  # harness version, from trajectory.json -> agent.version
+    model_name: str = ""  # model served to the harness, from agent.model_name
     tool_calls: list[dict[str, Any]] = field(default_factory=list)
     reasoning: list[str] = field(default_factory=list)
     messages: list[str] = field(default_factory=list)
@@ -116,6 +119,13 @@ class HarborTrial:
         if self.reward is None or not self.scoreable:
             return None
         return self.reward >= 1.0
+
+    @property
+    def harness(self) -> str:
+        """Scaffold identity (Axis V). Two bundles may share a `source` while
+        running different agent harnesses; pooling them is a scaffold
+        violation, so every stratified analysis keys on this."""
+        return f"{self.agent_name} {self.agent_version}".strip()
 
     def as_trace(self) -> dict[str, Any]:
         """Shape accepted by the intent labeller / atom fingerprinter."""
@@ -285,6 +295,10 @@ def load_trial(inst_dir: Path, *, run: str) -> HarborTrial | None:
                 }
             )
 
+    agent_meta = traj.get("agent")
+    if not isinstance(agent_meta, dict):
+        agent_meta = {}
+
     fm = traj.get("final_metrics") or {}
     return HarborTrial(
         run=run,
@@ -297,6 +311,9 @@ def load_trial(inst_dir: Path, *, run: str) -> HarborTrial | None:
         n_tests_run=n_tests_run,
         collection_error=collection_error,
         exception_type=exception_type,
+        agent_name=str(agent_meta.get("name") or "unknown"),
+        agent_version=str(agent_meta.get("version") or ""),
+        model_name=str(agent_meta.get("model_name") or ""),
         tool_calls=calls,
         reasoning=reasoning,
         messages=messages,

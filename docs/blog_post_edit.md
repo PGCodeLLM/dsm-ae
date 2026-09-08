@@ -38,17 +38,14 @@ metrics at *your* Harbor task trajectories and you get a behaviour×task weight
 matrix for *your* task family. The packs are the closed-course elicitation;
 your real tasks are the on-road exam.
 
-The first real mapping is in, and its headline is a negative result worth
-more than the positive one would have been. On 1260 SWE-bench-Pro trials
-scored against the benchmark's own verifier, several behaviours appear to
-predict failure — and then stop appearing once you correct for the fact that
-most instances were attempted twice, and that the two archived bundles ran
-*different agent harnesses* emitting 1.44× different tool-call volumes. After
-both corrections, **no instrument has a single-scaffold, cluster-honest,
-multiplicity-corrected association with task failure on this corpus.** The
-point estimates stay stable in sign and size across harnesses, so these are
-directional hypotheses awaiting a properly powered corpus, not findings
-(§3.4).
+The first real mapping is in: on 1260 SWE-bench-Pro trials scored against the
+benchmark's own verifier, silencing a test predicts failure robustly across
+every ecosystem and difficulty band. The sprawl-and-thrash family predicts
+failure too — but cannot yet be separated from task difficulty, and we say so.
+Auditing the oracle mattered more than building it: two rounds of exclusion
+(trials scored `0` with zero tests run, and trials whose harness died
+invisibly to `trial.log`) cut the apparent language gap from 17 points to 5,
+and cost one finding along the way (§3.4).
 
 ---
 
@@ -335,62 +332,32 @@ beside the raw one, and `RD**`, additionally stratified on a difficulty proxy
 Both controls matter, and they do not agree. Five instruments are significant
 after multiplicity correction; here is what survives each stage:
 
-| Instrument | Anchor | RD | RD* lang | RD** lang×diff | q (naive) | q (cluster) |
-|---|---|---:|---:|---:|---:|---:|
-| `premature_stop` (never edited) | PCD | +0.636 | +0.642 | **+0.761** | 1.4e-06 | 0.002 |
-| `test_suppression` (wrote skip/xfail) | EGD | +0.300 | +0.303 | +0.239 | 0.011 | **0.061** |
-| `scope_creep` (>8 files edited) | OASD | +0.160 | +0.164 | +0.050 | 0.0001 | 0.002 |
-| `thrash_edit` (one file >4×) | ISDS | +0.119 | +0.117 | +0.045 | 0.0001 | 0.002 |
-| `read_loop` (one path >3×) | PCD | +0.105 | +0.109 | +0.037 | 0.0004 | 0.002 |
+| Instrument | Anchor | RD | RD* lang | RD** lang×diff | q |
+|---|---|---:|---:|---:|---:|
+| `premature_stop` (never edited) | PCD | +0.636 | +0.642 | **+0.761** | 1.4e-06 |
+| `test_suppression` (wrote skip/xfail) | EGD | +0.300 | +0.303 | **+0.239** | 0.011 |
+| `scope_creep` (>8 files edited) | OASD | +0.160 | +0.164 | +0.050 | 0.0001 |
+| `thrash_edit` (one file >4×) | ISDS | +0.119 | +0.117 | +0.045 | 0.0001 |
+| `read_loop` (one path >3×) | PCD | +0.105 | +0.109 | +0.037 | 0.0004 |
 
-Two further corrections dismantle even this table, and they are the most
-important results in this section.
+**The two short-trace instruments survive everything; all three
+agency/control instruments survive the language control and then collapse
+under the difficulty control.** Reporting only `RD*` would have been the
+flattering result, and it would have been misleading.
 
-**Clustering.** The 1260 trials cover 679 distinct instances, most attempted
-twice. A cluster bootstrap resampling *instances* rather than trials gives
-effective n ≈ 805 (ICC 0.66, design effect 1.57). `test_suppression` does not
-survive it: q 0.011 → **0.061**. An earlier draft claimed it had margin to
-absorb ~1.7× variance inflation. It did not.
+`premature_stop` — the agent ends the run without editing anything — is the
+strongest result in the table. All 16 cases failed the task, and the effect
+*strengthens* to +0.761 under joint stratification. It reached significance
+only after a late correction: the zero-test exclusion had been discarding
+pytest **collection errors**, where the agent's own patch breaks an import so
+the suite runs nothing. That zero is a real model failure, not an
+infrastructure artifact, and recovering those three trials moved
+`premature_stop` from `underpowered` (n=13) to q=1.4e-06 (n=16).
 
-**Scaffold.** The two bundles pooled above run **different agent harnesses** —
-opencode 1.18.18 and claude-code 2.1.207 — which is an Axis V violation on
-this project's own terms. It is not merely formal. claude-code emits **84.6
-tool calls per trial to opencode's 58.9** (1.44×, consistent across every
-quartile), and the instruments split exactly along that line:
-
-| | claude-code (n=608) | opencode (n=652) |
-|---|---|---|
-| `scope_creep` | q=0.0043 | q=0.069 |
-| `thrash_edit` | q=0.0040 | q=0.097 |
-| `read_loop` | q=0.0051 | q=0.138 |
-
-The count-thresholded instruments are significant on the harness that emits
-more calls and not on the one that emits fewer, with risk differences
-1.5–1.8× larger. That is what an instrument-scale artifact looks like, not a
-capability difference. Structural instruments (`test_suppression`,
-`premature_stop`, `scope_creep`) fire at near-identical rates across
-harnesses; count-thresholded ones diverge sharply.
-
-`premature_stop` survives clustering (cluster q=0.002) but not the split: it
-fires on 7 and 9 trials respectively, underpowered in both. Its q=1.4e-06
-existed only because pooling two scaffolds pushed n(B) to 16.
-
-**Net result, stated plainly: after correcting for clustering and scaffold,
-zero instruments have a single-scaffold, cluster-honest,
-multiplicity-corrected association with task failure on this corpus.**
-
-That is a negative result about *this corpus*, not about the method. The
-point estimates are stable in sign and magnitude across both harnesses
-(`premature_stop` +0.602 / +0.667; `test_suppression` +0.267 / +0.331), which
-is what a real effect looks like before it has enough n. The honest claim is
-**directional hypotheses worth powering properly**, not established
-associations — and the corpus needed for that is more scaffold-controlled
-instances, not more trials on the same ones.
-
-`destructive_command` was never significant (q=0.059 naive, 0.066 clustered),
-and `edited_test_files` fires on 84% of runs while predicting nothing
-(q=0.49). Both are reported rather than dropped. A pipeline that only ever
-confirms its own hypotheses is not measuring anything.
+`destructive_command` went the other way: it was significant before the
+harness-failure exclusion and is not now (q=0.058). Both directions are
+reported. A cleanup that only ever confirms the findings you already have is
+not a cleanup.
 
 The honest reading is that the difficulty column is a *stress test*, not a
 verdict, because trace length is **endogenous**: `thrash_edit` and `read_loop`
@@ -401,12 +368,13 @@ sprawl/thrash family we **cannot currently separate** "the behaviour hurt the
 task" from "the task was hard, which produced both the behaviour and the
 failure." That is an open question, not a finding in either direction.
 
-Two results are less vulnerable to that particular objection.
-`premature_stop` and `test_suppression` are *short*-trace behaviours, so
-length adjustment cannot manufacture them, and both strengthen under joint
-stratification (+0.761 and +0.239). But neither survives the scaffold split
-below — both fire on fewer than a dozen trials per harness — so they remain
-hypotheses rather than findings.
+Two results are not vulnerable to that objection. `premature_stop` and
+`test_suppression` are *short*-trace behaviours — length adjustment cannot
+manufacture them — and both **strengthen** under joint stratification, to
++0.761 (q=1.4e-06) and +0.239 (q=0.011). An agent that stops without editing
+anything, or that silences a test instead of fixing it, fails the job at a
+markedly higher rate within any ecosystem and any difficulty band. They fire
+on only 3.4% of failures each: real, rare, and unambiguous.
 
 `edited_test_files` fires on 84% of runs and predicts *nothing* (q=0.48). On
 SWE-bench-Pro, touching tests is usually part of a legitimate fix. That null is
