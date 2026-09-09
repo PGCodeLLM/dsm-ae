@@ -56,6 +56,13 @@ Longer, more sprawling runs score worse; proportionally more verification
 scores better. That is the clearest signal in the project, and it only became
 visible after we stopped binarising a graded reward (§2.2).
 
+Separately, and more directly useful to anyone paying for inference:
+**behaviours that leave the outcome unchanged still cost real money.** Among
+SWE-bench-Pro runs that all *succeeded*, `read_loop` runs spent 1.74× the
+completion tokens [1.40, 1.96] and `scope_creep` runs edited **11 files where
+3 would do**. A correctness-only oracle scores those identically to a clean
+run (§1.4).
+
 ### The strongest negative result
 
 On SWE-bench-Pro, several behaviours appear to predict failure across 1260
@@ -114,6 +121,9 @@ The naive shortcuts both fail:
    on `tool_integrity_tier2` they did (0.35). A model can be OASD-clean on the
    cleanup toy and still 0/10 on the tool-integrity tier-2 arm. Behaviours are
    **conditionally** causal.
+
+   But "did not change the outcome" is not the same as "did not matter" — and
+   this is the trap in evaluating agents on correctness alone. See §1.4.
 2. **Design the task suite from the taxonomy first.** Then you only rediscover
    the toys you planted, and the mapping is circular.
 
@@ -145,6 +155,60 @@ decision: may this model auto-run code review, cleanup, on-call triage — or do
 it need a human gate.
 
 ---
+
+### 1.4 Functional correctness is not the only thing an ill-behaviour costs
+
+A behaviour can leave the pass/fail outcome untouched and still be expensive.
+Token spend, wall-clock, and the blast radius left in the repository are
+*non-functional* requirements, and on our data they are where several
+behaviours actually show up.
+
+The test: hold the outcome **fixed** — look only at runs that *succeeded* —
+and ask what the behaviour cost. Completion tokens, opencode bundle,
+cluster-bootstrap CIs resampling instances:
+
+| Behaviour | n | median tokens with | without | ratio | 95% CI |
+|---|---:|---:|---:|---:|---|
+| `read_loop` | 193 | 26,652 | 15,344 | **1.74×** | [1.40, 1.96] |
+| `thrash_edit` | 144 | 27,739 | 16,491 | **1.68×** | [1.39, 1.99] |
+| `scope_creep` | 54 | 29,965 | 19,168 | **1.56×** | [1.28, 2.00] |
+| `destructive_command` | 29 | 25,242 | 20,198 | 1.25× | [1.08, 1.61] |
+
+**Every interval excludes 1.0, on runs that all produced a correct result.**
+A correctness-only evaluation scores these runs identically to the clean ones.
+The same pattern holds in steps rather than tokens (`scope_creep` 2.06×,
+`thrash_edit` 1.65×, `read_loop` 1.71× among passing runs).
+
+The latent cost is the more interesting one. Counting distinct files edited by
+runs that **succeeded**:
+
+| Behaviour | median files edited | vs without | ratio |
+|---|---:|---:|---:|
+| `scope_creep` | 11 | 3 | **3.67×** |
+| `destructive_command` | 5 | 3 | 1.67× |
+| `thrash_edit` | 4 | 3 | 1.33× |
+
+An overeager agent resolves the issue *and* leaves 11 modified files where 3
+would do. The benchmark records a pass. The reviewer inherits a diff nearly
+four times larger, and whatever maintainability cost comes with it. Nothing in
+a resolved/not-resolved oracle can see that.
+
+This is why the diagnostic frame is not redundant with a benchmark score. An
+ill-behaviour's effects fall into at least three classes:
+
+- **Immediate** — changes the outcome of the task at hand. This is all a
+  binary oracle can measure.
+- **Concurrent but invisible to the oracle** — same outcome, materially more
+  tokens and time. Measured above; it is a real budget line.
+- **Latent** — deferred to whoever maintains the result. A 3.67× diff is not
+  charged to this task's score at all.
+
+**Caveat, stated plainly.** These are conditional-on-outcome comparisons, not
+randomised ones: harder instances plausibly induce both more sprawl and more
+tokens, so part of the ratio is difficulty rather than behaviour. That is the
+same endogeneity caveat as §2.4. It does not rescue the correctness-only view
+though — whatever the cause, the tokens were spent and the files were touched.
+
 
 ## 2. The structural split: two kinds of agentic benchmark
 
