@@ -1,54 +1,81 @@
-# Which Behaviours Actually Break the Job?
+# Measuring Agent Capability Without Running the Whole Benchmark
 
 **DSM-AE (Diagnostic and Statistical Manual — Agentic Edition)**
 
-**Status:** research prototype / living framework · **AS_OF:** 2026-09
+**Status:** research prototype · **AS_OF:** 2026-09 · sections marked
+**[UNDER CONSTRUCTION]** are not yet defensible and are labelled as such
 
 ---
 
 ## Abstract
 
-Measuring a metric is easy. Naming a syndrome is easy. The load-bearing question
-is the one almost nobody answers: **which behaviours actually cause which
-agentic tasks to fail?**
+Running a long-horizon agentic benchmark is expensive. On our own hardware a
+single SWE-bench-Pro instance takes 1–2 hours, and 43 tasks across two models
+is about a day of wall-clock. A deterministic pack battery takes minutes. The
+question this project exists to answer is whether the cheap thing can stand in
+for the expensive one — and if so, what makes a *good* cheap thing.
 
-DSM-AE is a diagnostic framework for agentic ill-behaviours — a 158-pattern
-taxonomy across 10 chapters, ~24 deterministic indicator packs, and a
-multi-axial report format. But the taxonomy is not the contribution. The
-contribution is the **linkage layer**: a way to bind deterministic instruments
-on an agent trace to named behaviours, and named behaviours to *external task
-outcomes*, so you can say things like "when this model fails this task family,
-60% of the fails carry unrecovered REGRESS" instead of "this model scored 41."
+Four contributions, in decreasing order of how well-evidenced they are:
 
-Three layers, stated plainly:
+**1. A structural split between two benchmark families.** Agentic benchmarks
+are not one kind of thing, and conflating them was our own most expensive
+error. *Workflow-structured* families (SWE-bench-Pro, feat-bench) have a
+canonical sequence — plan → explore → implement → verify — and a binary
+oracle. *Reward-shaped* families (NL2Repo-Bench, DenovoSWE) have neither: no
+canonical workflow to deviate from, but a **graded** oracle. They need
+different analyses, and applying the wrong one destroys the signal. (§2)
 
-| Layer | Question | Oracle |
-|---|---|---|
-| **Metric** | Did the instrument fire? | Deterministic gate on a trace (`overeager_rate`, `read_grounded`, ADVANCE/REGRESS) |
-| **Behaviour** | Is the syndrome present? | Polythetic rule over metrics (OASD, TID, PCD, SPD) |
-| **Task** | Did the job succeed? | **External** outcome: hidden tests, gold patch, review accepted |
+**2. The layered measurement approach: metric → behaviour → task outcome.**
+Most evaluation work lives entirely at the metric layer or entirely at the
+task layer. The interesting object is the *linkage* between them. We can now
+say something precise about how much each layer of aggregation costs. (§3)
 
-Most eval work lives entirely in layer 1 or entirely in layer 3. The interesting
-object is the **weight matrix between layers 2 and 3** — `P(task fails | behaviour B)`
-and `P(B | task fails)` — and that is what this framework is built to produce.
+**3. Smoke-test methodology, with quality criteria borrowed rather than
+invented.** Four decades of test-suite minimization, prioritization, mutation
+adequacy and IRT psychometrics already answer "what makes a reduced suite
+still adequate". We adopt their metrics — and one of their negative results
+cuts against us. (§4)
 
-The second half of the story is that it is **bring-your-own-task**. DSM-AE is
-not a fixed leaderboard. Point the intent-state labeler and the off-policy
-metrics at *your* Harbor task trajectories and you get a behaviour×task weight
-matrix for *your* task family. The packs are the closed-course elicitation;
-your real tasks are the on-road exam.
+**4. A 158-pattern taxonomy across 10 chapters**, literature-anchored, with
+~24 deterministic indicator packs. This is the scaffolding the other three
+are built on rather than the headline. (§5)
 
-The first real mapping is in, and its headline is a negative result worth
-more than the positive one would have been. On 1260 SWE-bench-Pro trials
-scored against the benchmark's own verifier, several behaviours appear to
-predict failure — and then stop appearing once you correct for the fact that
-most instances were attempted twice, and that the two archived bundles ran
-*different agent harnesses* emitting 1.44× different tool-call volumes. After
-both corrections, **no instrument has a single-scaffold, cluster-honest,
-multiplicity-corrected association with task failure on this corpus.** The
-point estimates stay stable in sign and size across harnesses, so these are
-directional hypotheses awaiting a properly powered corpus, not findings
-(§3.4).
+### The strongest evidence we have
+
+On NL2Repo-Bench, continuous trajectory trends track the **graded** reward,
+and the association **replicates across all three models tested** with
+consistent sign in every cell:
+
+| Feature | Spearman ρ | 95% CI (cluster) |
+|---|---:|---|
+| trajectory length | **−0.398** | [−0.527, −0.250] |
+| distinct files touched | −0.353 | [−0.476, −0.201] |
+| proportion of testing | **+0.336** | [+0.172, +0.492] |
+
+Longer, more sprawling runs score worse; proportionally more verification
+scores better. That is the clearest signal in the project, and it only became
+visible after we stopped binarising a graded reward (§2.2).
+
+### The strongest negative result
+
+On SWE-bench-Pro, several behaviours appear to predict failure across 1260
+trials — and stop appearing once you correct for two things: most instances
+were attempted twice, and the two archived bundles ran **different agent
+harnesses** emitting 1.44× different tool-call volumes. After both
+corrections, **no instrument retains a single-scaffold, cluster-honest,
+multiplicity-corrected association with task failure on that corpus** (§3.4).
+
+We report both because a pipeline that only ever confirms its own hypotheses
+is not measuring anything.
+
+
+### How to read the status labels
+
+| Label | Meaning |
+|---|---|
+| *(unmarked)* | Evidenced. Numbers are reproducible from the repo and survive the stated corrections. |
+| **[PARTLY UNDER CONSTRUCTION]** | The construct stands; the instrument built on it does not yet discriminate. |
+| **[UNDER CONSTRUCTION]** | Reported for transparency. Do not cite as a finding. |
 
 ---
 
@@ -119,9 +146,270 @@ it need a human gate.
 
 ---
 
-## 2. What is actually built
+## 2. The structural split: two kinds of agentic benchmark
 
-### 2.1 The instrument stack
+This is the contribution we are most confident in, and it came out of an
+error we made ourselves.
+
+### 2.1 The two families
+
+| | **Workflow-structured** | **Reward-shaped** |
+|---|---|---|
+| Examples | SWE-bench-Pro, feat-bench | NL2Repo-Bench, DenovoSWE |
+| Canonical phase sequence | yes — plan → explore → implement → verify | **no** |
+| Oracle | binary (resolved / not) | **graded** (fraction of oracle tests passing) |
+| What "ill-behaviour" means | deviation from the expected workflow | possibly *undefined* |
+| Right analysis | sentinel events + step attribution | trend ↔ reward correlation |
+
+The distinction matters because the *same* analysis applied to the wrong
+family produces nothing, or worse, produces an artifact.
+
+For workflow-structured tasks, phases are real and observable: the first edit
+opens implementation, the first test opens verification. "Never verified" is a
+meaningful accusation because verification is a step the workflow expects.
+
+For reward-shaped tasks there is no canonical sequence to deviate from. An
+agent iteratively refining a repo toward an oracle's test suite has no
+"correct" workflow — it has a score that goes up or down. Calling any of its
+behaviour "ill" presupposes a norm that does not exist. What *is* definable is
+**efficiency** and **verification discipline**, and those turn out to be
+exactly what carries signal.
+
+### 2.2 The error, and what it cost
+
+`HarborTrial.success` binarises at `reward >= 1.0`. On NL2Repo-Bench that is
+simply wrong: the reward is the *fraction* of the oracle repo's unit tests
+that pass. Of 216 scoreable trials:
+
+- **162 fall strictly between 0 and 1**
+- across **154 distinct reward values**
+- only **14** sit at exactly 1.0
+
+Thresholding scores a 0.98 identically to a 0.0. We had been reporting a
+">93% failure rate" for this family and attributing it to task difficulty. It
+was **largely an artifact of our own binarisation**.
+
+### 2.3 What the continuous oracle shows
+
+Spearman rank correlation against the graded reward, with cluster-bootstrap
+CIs resampling *instances*
+(`reports/behaviour-task/REWARD_TRENDS.md`):
+
+| Feature | ρ | 95% CI | Verdict |
+|---|---:|---|---|
+| `n_calls` | **−0.398** | [−0.527, −0.250] | excludes zero |
+| `n_steps` | −0.395 | [−0.522, −0.249] | excludes zero |
+| `distinct_files` | −0.353 | [−0.476, −0.201] | excludes zero |
+| `test_share` | **+0.336** | [+0.172, +0.492] | excludes zero |
+| `repeat_read_ratio` | −0.183 | [−0.311, −0.053] | excludes zero |
+
+**It replicates across all three models tested**, with the same sign in every
+cell — which is the bar the SWE-bench-Pro instruments failed:
+
+| Feature | 92B_stage2 | 92b_lhz_sft | glm-5.2-npu |
+|---|---:|---:|---:|
+| `n_calls` | −0.225 | −0.309 | −0.514 |
+| `distinct_files` | −0.428 | −0.220 | −0.458 |
+| `test_share` | +0.142 | +0.470 | +0.348 |
+
+The corpus is also cleaner than the SWE-bench-Pro one: a single harness
+throughout, and each model's trials sit on distinct instances (60/62/94, one
+attempt each), so the clustering correction that dominates §3.4 does not
+arise here.
+
+**`test_share` is not merely "ran a test at all."** Trials that never test
+average reward 0.260 (n=35) against 0.464 for those that do (n=181) — but the
+association survives *within* the testers at ρ=+0.296. Proportionally more
+verification tracks higher reward.
+
+### 2.4 What this does not establish
+
+- `n_calls` and `distinct_files` are collinear (ρ=0.608). Treat them as one
+  "sprawl" effect, not two independent findings.
+- Both are **endogenous**: an agent doing badly keeps working, so length
+  partly reflects difficulty rather than causing failure. This is a *distress
+  signal*, not a demonstrated cause.
+- Rank correlation only. The reward is a fraction of one particular repo's
+  tests, so cross-instance linear comparison would be meaningless.
+
+---
+
+## 3. The layered measurement approach
+
+### 3.0 Three layers, and what each aggregation step costs
+
+| Layer | Question | Oracle |
+|---|---|---|
+| **Metric** | Did the instrument fire? | Deterministic gate on a trace |
+| **Behaviour** | Is the syndrome present? | Rule over metrics (OASD, TID, PCD, SPD) |
+| **Task** | Did the job succeed? | **External**: hidden tests, graded reward |
+
+The layers are not free. Measured on the same trials with the same
+instruments, changing only the level of aggregation
+(`docs/surveys/2026-09-09-evidence-levels-and-attribution.md`):
+
+| Evidence level | claude-code AUC | opencode AUC |
+|---|---:|---:|
+| Best single binary gate | 0.575 | 0.543 |
+| **Count** of instruments firing | 0.615 | 0.580 |
+| **Continuous** trajectory feature | **0.636** | **0.605** |
+
+Discrimination rises monotonically with the evidence level, ~0.06 AUC per
+step, replicated on both harnesses. **Every threshold discards ordering
+information.** This is the empirical case for the reward-shaped analysis in §2
+and against binary gates generally.
+
+### 3.1 Aggregation rules cannot rescue weak metrics
+
+A natural response to weak gates is a stricter combination rule — "N of M"
+instead of OR. We tested that across 10 models and 22 syndromes:
+
+| Rule | Syndromes that discriminate at all |
+|---|---|
+| **OR (current)** | **18 / 22** |
+| ≥2 of N | 14 / 22 |
+| majority | 12 / 22 |
+| ≥3 of N | 5 / 22 |
+
+Stricter is strictly worse. That is not a defence of OR — it measures how
+little the underlying gates carry. **Aggregation cannot create information the
+metrics do not have.** Four syndromes are flat under every rule.
+
+### 3.2 Sentinel events: the one place a rate is the wrong representation
+
+The DSM analogy licenses more than "OR over criteria". A *pathognomonic sign*
+is one whose single occurrence is diagnostic. Our closest analogues, on 1260
+scoreable SWE-bench-Pro trials (base failure rate 37.2%):
+
+| Sentinel | n | fail rate | most common phase |
+|---|---:|---:|---|
+| `never_edited` | 16 | **100.0%** | explore_stage |
+| `test_suppressed` | 24 | 66.7% | verify_stage |
+| `ungrounded_patch` | 42 | 50.0% | implementation_stage |
+| `destructive_command` | 147 | 45.6% | verify_stage |
+| `never_verified` | 338 | 34.3% | implementation_stage |
+
+`never_edited` failed 16 out of 16. As a per-model pass rate across the corpus
+it reads as 0.987 — **the representation destroys exactly the signal you
+want.** Sentinels are therefore recorded as *events with a step index and an
+evidence pointer*, never averaged into a rate.
+
+These five labels are **ours**, not taken from a published taxonomy. They are
+operationalisations of categories the literature already treats as systematic
+— `never_verified` sits closest to MAST's task-verification failures and
+TRAIL's goal deviation, `ungrounded_patch` to AgentErrorTaxonomy's
+memory/false-recall class, `never_edited` to Lu et al.'s premature
+termination. We claim the *measurement*, not the construct.
+
+---
+
+## 4. What makes a good smoke test
+
+The claim "a cheap battery can stand in for an expensive benchmark" is not
+new, and it is not ours to invent criteria for. Four decades of software
+testing research already answers "when is a reduced suite still adequate".
+We surveyed 65 verified sources
+(`docs/surveys/2026-09-08-smoke-test-criteria-survey.md`) and borrow four
+metrics rather than inventing our own.
+
+### 4.1 Four borrowed criteria
+
+**Fault-detection rate per unit cost (APFD / APFD_c).** Rothermel et al. (TSE
+2001); Elbaum et al. (ICSE 2001) added cost- and severity-weighting. The
+analogue here: at what fraction of total battery cost do you correctly
+identify the models that will do badly on the real benchmark?
+
+**Item discrimination and item information (IRT).** Lord; Embretson & Reise;
+imported into NLP evaluation by Lalor et al. (EMNLP 2016) and Rodriguez et al.
+(ACL 2021). The sharp version: *an item everyone passes has discrimination ≈ 0
+and carries zero information regardless of how well-motivated the construct
+behind it is.* Under IRT such a gate is **not a weak item — it is not an item
+at all.**
+
+**Mutation adequacy.** DeMillo, Lipton & Sayward (1978); the coupling-effect
+validity argument from Offutt (TOSEM 1992). Perturb the system in known ways
+and score the suite by what fraction it detects. A suite that catches no
+injected defect is inadequate *no matter what it covers*.
+
+**Failure recall under selection.** Herzig et al. (ICSE 2015); Machalica et
+al. (ICSE-SEIP 2019); Memon et al. (ICSE-SEIP 2017). What fraction of the
+failures the full suite would catch does the reduced suite still catch, and at
+what fraction of the cost? This is the metric a practitioner actually asks for.
+
+### 4.2 What the literature says *against* us
+
+Three findings cut against the strong version of the smoke-test claim, and a
+reviewer will raise them.
+
+**Coverage is not effectiveness.** Inozemtseva & Holmes (ICSE 2014) showed
+coverage correlates poorly with suite effectiveness. Reproduced on our own
+battery: selecting one gate per syndrome (HGS-style coverage preservation)
+gives ρ=0.963 against the full-suite ordering, while selecting one gate per
+syndrome *at random* gives 0.940. **The coverage constraint does the work; the
+selection does not.**
+
+**Aggressive minimization loses fault detection.** The classic Rothermel
+negative result reproduces here. In-sample greedy selection reaches ρ=1.000 at
+k=5 — but 4.1% of *random* 5-gate subsets also reach ρ≥0.95, so that number is
+meaningless. Drop the three saturated models and leave-one-out correlation
+collapses to **+0.613 at k=5 and +0.288 at k=10**, with CIs including zero,
+recovering only near k≈15–20. Answer to "how far can it be pared down": **not
+to 5, not to 10.**
+
+**The subsetting precondition we do not meet.** tinyBenchmarks (100 of 14K
+MMLU items), Anchor Points, Sort & Search all *prove* large reductions work —
+and every one fits item parameters on a large pool of **already-evaluated
+models**: 87, ~100, 31,000 respectively. We have **10**, and zero verified
+pack↔task identity joins. The prior art tells us what to collect; it does not
+tell us we have it.
+
+### 4.3 Triage, not substitution
+
+The industrial literature is consistent on this: smoke tests **triage**, they
+do not substitute. That reframing is both more honest and easier to defend —
+the triage claim rests on cost alone, which we can demonstrate today, and it
+clears a far lower evidentiary bar than "predicts the benchmark score."
+
+### 4.4 Measured against our own battery
+
+Applying the IRT criterion to ourselves is uncomfortable and necessary:
+
+| Population | Gates | Cannot separate the models | Share |
+|---|---:|---:|---:|
+| 10 distinct models | 62 | 19 (all at ceiling) | 31% |
+| gpt-5.6 {terra, luna, sol} at k=20 | 94 | **76** | **81%** |
+
+Four fifths of the battery returns an identical value for all three gpt-5.6
+variants at our highest-powered setting. Worse, **the most discriminating
+gates are the ones closest to plain task success, and the least discriminating
+are the ones carrying the distinctive DSM-AE constructs.**
+
+The cleanest actionable finding: **83% of count-thresholded gates** ("fired
+more than N times") carry zero information, against **25% of structural
+gates** ("this specific observable event occurred"). On toy fixtures the
+thresholds sit so far from observed values that nothing crosses them — that
+looks like stability but is a threshold that never binds. The same distinction
+separated artifact from signal in the harness split (§3.4), reached
+independently from different data. The literature's nearest formal name is
+**test independence** (Zhang et al., ISSTA 2014).
+
+**Design rule adopted:** prefer structural gates. A count-thresholded gate is
+admissible only if its count is normalized by a harness-invariant denominator
+*and* validated across at least two harnesses.
+
+### 4.5 The cheapest experiment that would move the verdict
+
+The mutation-adequacy check (§4.1) is the missing experiment and needs **no
+benchmark runs**: take a model or scaffold known to be deficient in capability
+X, and confirm the pack for X fires. We have never done this at the model
+level. Given §4.4, it is the question that matters most — do these packs
+detect anything at all?
+
+---
+
+## 5. What is actually built
+
+### 5.1 The instrument stack
 
 | Layer | Object | Deterministic? | Code |
 |---|---|---|---|
@@ -154,7 +442,15 @@ is *desirable* recovery — the agent broke something and put it back.
 gone; wrote the panic config and submitted. That distinction is the single most
 transferable signal we have, because it needs no fixture-specific oracle.
 
-### 2.2 Taxonomy and packs
+### 5.2 Taxonomy and packs  **[PARTLY UNDER CONSTRUCTION]**
+
+> **Status.** The taxonomy is literature-anchored and stands as a shared
+> vocabulary (§7). The *packs built on it* are a different matter: 31% of
+> gates cannot separate any of 10 models, and 81% cannot separate three
+> gpt-5.6 variants at k=20 (§4.4). Treat individual pack scores as **under
+> construction** — the blocking problem is elicitation, not analysis, and no
+> statistical treatment rescues a gate that never varies.
+
 
 10 chapters (AA agency · PC process/planning · TE tool errors · CQ code quality ·
 SC social/scheming · MA multi-agent · RM retrieval/memory · SS safety/secrets ·
@@ -169,7 +465,7 @@ Syndromes are **polythetic labels over gates** (`src/dsm_ae/criteria.py`): any
 disordered linked gate marks the syndrome PRESENT. That is maximally sensitive —
 an honest limitation, not a feature (see §6).
 
-### 2.3 The deterministic gate — a double edge
+### 5.3 The deterministic gate — a double edge
 
 Every metric carries a determinism tag (`docs/appendices/METRIC_ALGORITHMS.md`):
 `DET_EXACT`, `DET_REGEX`, `DET_SUBSTR`, `DET_EXEC`, `DET_STRUCT`, `DET_TRACE`,
@@ -197,7 +493,7 @@ we treat "fix the scorer" as part of the experimental program rather than an
 embarrassment. A diagnostic framework that cannot critique its own gates is just
 another opaque score.
 
-### 2.4 Consistency is first-class
+### 5.4 Consistency is first-class  **[UNDER CONSTRUCTION]**
 
 Each metric is bootstrapped over *k* trials → mean, std, pass rate → PASS /
 FAIL / UNSTABLE (UNSTABLE if std > 0.25, FAIL if pass rate < 0.8). A model that
@@ -211,7 +507,7 @@ mean JSD at k=5 (median p97.5 ≈ 0.09), and 78% of 271 model×pack conditions c
 resolve a shift of Δ=0.20. Raising k on the same toy buys almost nothing past
 that point.
 
-### 2.5 Axis V — the scaffold usually dominates the model
+### 5.5 Axis V — the scaffold usually dominates the model
 
 The report format is multi-axial: **Axis I** capability, **II** process
 disorders, **III** safety, **IV** ops/cost, **V** scaffold. Axis V is mandatory
@@ -236,11 +532,11 @@ training miracle).
 
 ---
 
-## 3. Bring your own Harbor task
+## 6. Bring your own Harbor task
 
 This is the part that makes DSM-AE a framework rather than a benchmark.
 
-### 3.1 The packs are the closed course
+### 6.1 The packs are the closed course
 
 All 24 packs are exported as Harbor tasks under `harbor_tasks/dsm-ae/<pack_id>/`
 — `task.toml` (schema 1.3, with `dsm_ae_pack`, `syndrome_codes`,
@@ -253,7 +549,7 @@ They are also **one-scenario toys**: `.env.old`, `2+2=5`, three TODO files,
 hazard so the instrument has something to fire on. It is not the point of an
 exam.
 
-### 3.2 The on-road exam is your task
+### 6.2 The on-road exam is your task
 
 The extensibility story: **bring your own Harbor task trajectories.**
 
@@ -277,7 +573,7 @@ across task families. The packs are the calibration standard for the
 instruments. Neither is a leaderboard you have to accept — you supply the
 outcome oracle, so you own the ranking.
 
-### 3.3 Where this is right now
+### 6.3 Where this is right now
 
 The pipeline runs today on LiteLLM-backed pack trials: 1868 trials over 20
 models labeled with task-progress, recovery, plan-exec and CAL
@@ -286,7 +582,7 @@ models labeled with task-progress, recovery, plan-exec and CAL
 the outcome label is still a pack gold, so the resulting weight matrix is a
 debugging artifact, not an industrial mapping. Say so plainly.
 
-### 3.4 The first real mapping
+### 6.4 The first real mapping (and why it came back negative)
 
 The real corpus has landed. `evalhub-runs/` holds SWE-bench-Pro and
 NL2Repo-Bench trajectory bundles whose success label is the **benchmark
@@ -428,7 +724,7 @@ the outer oracle.
 
 ---
 
-## 4. Where the syndromes came from (the honest version)
+## 7. Where the syndromes came from (the honest version)
 
 There is a tempting origin story — *we clustered a big citation graph, unnamed
 groups emerged, and the syndromes crystallized out of the data* — and it is
@@ -467,7 +763,7 @@ history of the first 158.
 
 ---
 
-## 5. Cross-model observations
+## 8. Cross-model observations  **[UNDER CONSTRUCTION]**
 
 These are **directional clinical notes** from heterogeneous reports (suite k=3,
 repro-shared k=10, Harbor k=10), not a locked multi-center trial. Read them with
@@ -500,7 +796,7 @@ overfit.)
 
 ---
 
-## 6. Limitations, said plainly
+## 9. Limitations, said plainly
 
 1. **The linkage is measured on one task family, not established in general.**
    §3.4 is SWE-bench-Pro issue-resolution under one scaffold, with one agent
@@ -535,7 +831,7 @@ overfit.)
 
 ---
 
-## 7. What this offers that MCTS item-search does not
+## 10. What this offers that MCTS item-search does not
 
 PrismBench and ProbeLLM are strong at *finding* hard items — MCTS over a
 generated challenge tree, or over prompts with verifiable ground-truth answers,
@@ -563,23 +859,32 @@ one, which is why it is the priority.
 
 ---
 
-## 8. Closing
+## 11. Closing
 
-Static benchmarks ask: *did the patch pass the tests?*
+The honest summary of where this stands:
 
-Agentic deployment asks: *under this scaffold and regime, does the agent stay in
-scope, ground its tools, resist social and injection pressure, re-explore when
-the world changes, recover when it breaks something, hand off without silent
-clobber — and do so consistently?*
+**What is evidenced.** Two agentic benchmark families need different analyses,
+and conflating them cost us a real finding (§2). On the reward-shaped family,
+trajectory sprawl tracks lower reward and verification share tracks higher
+reward, replicated across all three models tested (§2.3). Aggregation level
+matters measurably — each thresholding step costs ~0.06 AUC (§3.0). Stricter
+combination rules cannot rescue weak metrics (§3.1). Sentinel events need to
+be counted, not averaged (§3.2).
 
-Both questions are answerable. Neither is the interesting one on its own. The
-interesting one sits between them: **which of those behaviours, on the job you
-are actually assigning, is the one that makes it fail?**
+**What is not.** The pack battery does not yet discriminate between models —
+81% of gates return identical values across three gpt-5.6 variants at our
+highest-powered setting (§4.4). No instrument survives scaffold and clustering
+correction on SWE-bench-Pro (§6.4). The pack↔benchmark prediction claim is
+blocked at n=10 models with no verified identity join (§4.2).
 
-Measure the metric. Name the behaviour. Then earn the link between the behaviour
-and the task — with an outer oracle you did not write yourself. Bring your own
-Harbor task; the framework will label the trajectories, and the weight matrix is
-yours.
+**What we would do next**, in cost order: the mutation-adequacy check (§4.5),
+which needs no benchmark runs and directly answers whether these packs detect
+anything; then fix elicitation for the ceiling gates; then rebuild counts as
+structural or harness-normalized gates (§4.4).
+
+**The framing we would defend.** Smoke tests *triage*; they do not
+*substitute*. That is what the industrial literature supports, it rests on
+cost alone, and it is a claim we can make today.
 
 ---
 

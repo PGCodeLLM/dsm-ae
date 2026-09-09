@@ -1531,6 +1531,9 @@ def build_html(
     font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   }}
   .toc {{ font-size: 12px; margin: 0 0 10px; }}
+  .uc-banner {{ font-size: 12px; line-height: 1.45; margin: 0 0 10px;
+    padding: 7px 9px; border: 1px solid #ccc; border-left: 3px solid #888;
+    background: #f5f5f5; max-width: 860px; }}
   .toc a {{ margin-right: 8px; }}
   /* Anchor targets: leave room under sticky thead / shell chrome */
   details.syndrome,
@@ -1627,6 +1630,13 @@ def build_html(
 </head>
 <body>
   <h1>{html.escape(title)}</h1>
+  <p class="uc-banner"><strong>Under construction.</strong> Individual pack and
+  syndrome scores below are <em>not yet model-discriminating</em>: 31% of gates
+  return the same value for all 10 models measured, and 81% cannot separate three
+  gpt-5.6 variants at k=20. Treat this matrix as a development view, not a
+  ranking. The evidenced results are in the
+  <a href="blog/index.html" target="_blank" rel="noopener">blog</a>
+  (&sect;2 structural split, &sect;3 layered measurement, &sect;4 smoke-test criteria).</p>
   <div class="meta">
     Generated {html.escape(generated)} ·
     {len(models)} model(s) ·
@@ -1664,7 +1674,7 @@ def build_html(
     <a href="#pack-coverage">Pack coverage</a>
     <a href="#source-files">Source files</a>
     <a href="#metric-algorithms">Metric algorithms</a>
-    <a href="blog/index.html" target="_blank" rel="noopener">Blog: behaviour → task</a>
+    <a href="blog/index.html" target="_blank" rel="noopener">Blog: measuring agent capability</a>
   </div>
 
   <h2 id="syndrome-matrix">Syndrome matrix</h2>
