@@ -66,11 +66,23 @@ You are given the tool-call trajectory of an agent attempting a software task,
 and the ground-truth outcome (resolved or not). Your job is to localize WHERE
 the run went wrong and characterise WHY.
 
-Definition of the failure step (follow this precisely): the EARLIEST step after
-which no continuation could still succeed. This is recoverability-aware — if a
-mistake was made at step 5 but the agent could still have recovered until step
-20, the failure step is 20, not 5. If the run succeeded, return null for the
-step.
+Definition of the failure step (follow this precisely): the EARLIEST step at
+which the agent took a WRONG ACTION that was never subsequently undone.
+
+This is recoverability-aware in one direction only: if the agent made a
+mistake at step 5 and then FIXED it at step 12, step 5 is not the failure
+step. But if the mistake at step 5 was never corrected, the failure step is
+5 — NOT the last step of the run.
+
+CRITICAL — the last step is almost never the right answer. "The run ended
+without succeeding" is true of every failed trajectory and carries no
+information. You must point at a SPECIFIC ACTION (or a specific omission at a
+specific point) that a competent agent would have done differently. If you
+genuinely cannot localize one, return null for failure_step and say so in
+resolution_rationale — that is a valid and useful answer.
+
+Ask yourself: "if I could edit exactly one step of this trajectory, which one
+would I change?" That step is the answer.
 
 Return STRICT JSON, no prose outside it:
 
@@ -98,6 +110,10 @@ Guidance:
   && so one flaky step aborts the rest".
 - If the run SUCCEEDED, still report observations (they may describe risky
   process that happened to work), set failure_step and failure_phase to null.
+- Do NOT default failure_step to the final step. A label at or near the last
+  index will be treated as a non-answer unless the decisive wrong action
+  genuinely occurred there (e.g. the agent submitted while a test was red).
+- Prefer an EARLY, specific step over a late, vague one.
 """
 
 

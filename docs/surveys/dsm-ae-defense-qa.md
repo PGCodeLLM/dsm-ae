@@ -1119,3 +1119,74 @@ catches that."* An analysis pipeline needs both a correct rule and a shape
 that makes bypassing it deliberate. Any bring-your-own-task user calling
 `load_run` directly inherits this, which is why the warning lives in the
 docstring and not only here.
+
+### Q28. Does anything work on reward-shaped (long-horizon) task families?
+
+**Yes — and it is the strongest, most replicable result in the project.** It
+required abandoning the binary oracle, which was destroying the signal.
+
+**The measurement error, first.** `HarborTrial.success` binarises at
+`reward >= 1.0`. On NL2Repo-Bench that is wrong: of 216 scoreable trials,
+**162 fall strictly between 0 and 1**, spread over **154 distinct reward
+values**, with only 14 at exactly 1.0. The reward is the *fraction* of the
+oracle repo's unit tests passing. Thresholding scores a 0.98 identically to a
+0.0. The >93% "failure rate" previously attributed to task difficulty (Q14) was
+therefore **largely a measurement artifact of our own binarisation**, not a
+property of the benchmark.
+
+**What continuous analysis finds.** Spearman ρ against the graded reward,
+cluster-bootstrap CIs resampling instances
+(`reports/behaviour-task/REWARD_TRENDS.md`):
+
+| Feature | ρ | 95% CI | Verdict |
+|---|---:|---|---|
+| `n_calls` | **−0.398** | [−0.527, −0.250] | excludes zero |
+| `n_steps` | −0.395 | [−0.522, −0.249] | excludes zero |
+| `distinct_files` | −0.353 | [−0.476, −0.201] | excludes zero |
+| `test_share` | **+0.336** | [+0.172, +0.492] | excludes zero |
+| `repeat_read_ratio` | −0.183 | [−0.311, −0.053] | excludes zero |
+
+**It replicates across all three models**, which no SWE-bench-Pro instrument
+managed (Q24):
+
+| Feature | 92B_stage2 | 92b_lhz_sft | glm-5.2-npu |
+|---|---:|---:|---:|
+| `n_calls` | −0.225 | −0.309 | −0.514 |
+| `distinct_files` | −0.428 | −0.220 | −0.458 |
+| `test_share` | +0.142 | +0.470 | +0.348 |
+
+Consistent sign in every cell. Each model's trials are on distinct instances
+(60/62/94, one attempt each), so within a model there is no clustering to
+correct for — the design-effect problem of Q23 does not arise here.
+
+**`test_share` is not merely "did it run a test".** Trials that never test
+average reward 0.260 (n=35) versus 0.464 for those that do (n=181) — but the
+association survives *within* the testers at ρ=+0.296. Proportionally more
+verification tracks higher reward, not just verification-vs-none.
+
+**Caveats that keep this honest.**
+
+- `n_calls` and `distinct_files` are collinear (ρ=0.608); treat them as one
+  "sprawl" effect, not two findings.
+- Both are **endogenous** — an agent doing badly keeps working — so this is the
+  Q16/Q26 over-adjustment trap again. Directionally it is a *distress signal*,
+  not a demonstrated cause.
+- Rank correlation only; reward is a fraction of one particular repo's tests,
+  so cross-instance linear comparison would be meaningless.
+
+**Why this matters structurally.** It separates two task families that this
+project had been conflating:
+
+| | Workflow-structured | Reward-shaped |
+|---|---|---|
+| Examples | SWE-bench-Pro, feat-bench | NL2Repo-Bench, DenovoSWE |
+| Canonical phases | yes (plan→explore→implement→verify) | **no** |
+| Oracle | binary | **graded** |
+| Analysis | sentinels + step attribution | trend↔reward correlation |
+| Result so far | zero instruments survive correction (Q24) | three features replicate |
+
+For reward-shaped families, "ill-behaviour" may not be definable at all —
+there is no canonical workflow to deviate from. What *is* definable is
+efficiency and verification discipline, and those are exactly what shows
+signal. The phase model in `harbor/steps.py` is hardcoded for the
+workflow-structured family and should not be applied to the other.
