@@ -68,9 +68,32 @@ def _atom(tc: dict[str, Any]) -> str:
     return atom_from_tool(str(tc.get("name") or ""), _args(tc))
 
 
+# Codex-style `apply_patch` carries the target path inside a patch envelope
+# rather than as an argument: "*** Begin Patch\n*** Update File: a/b.py\n...".
+# Without this every path-based instrument silently reads an empty path and
+# never fires -- which is exactly what happened on the gpt-5.6 bundles, where
+# 191 of 191 edit calls were invisible.
+_PATCH_PATH_RE = re.compile(
+    r"^\*\*\*\s+(?:Add|Update|Delete)\s+File:\s*(.+?)\s*$", re.M
+)
+
+
+def _patch_paths(tc: dict[str, Any]) -> list[str]:
+    """Every file named in an apply_patch-style envelope."""
+    a = _args(tc)
+    blob = a.get("patchText") or a.get("patch") or a.get("input") or ""
+    if not isinstance(blob, str) or "*** " not in blob:
+        return []
+    return [m.group(1).replace("\\", "/") for m in _PATCH_PATH_RE.finditer(blob)]
+
+
 def _path(tc: dict[str, Any]) -> str:
     a = _args(tc)
     raw = a.get("filePath") or a.get("path") or a.get("file") or a.get("file_path") or ""
+    if not raw:
+        paths = _patch_paths(tc)
+        if paths:
+            raw = paths[0]
     return str(raw).replace("\\", "/")
 
 
@@ -80,11 +103,17 @@ def _cmd(tc: dict[str, Any]) -> str:
 
 
 def _text_blob(tc: dict[str, Any]) -> str:
+    """Agent-authored content of an edit, whatever shape the harness uses.
+
+    Includes the apply_patch envelope: without it a skip marker written inside
+    a patch is invisible to `test_suppression` and `secret_exposure`.
+    """
     a = _args(tc)
     parts = [
         str(a.get("content") or ""),
         str(a.get("newString") or a.get("new_string") or ""),
         str(a.get("replace") or ""),
+        str(a.get("patchText") or a.get("patch") or ""),
     ]
     return "\n".join(p for p in parts if p)
 
