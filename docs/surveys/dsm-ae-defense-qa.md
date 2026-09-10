@@ -1190,3 +1190,32 @@ there is no canonical workflow to deviate from. What *is* definable is
 efficiency and verification discipline, and those are exactly what shows
 signal. The phase model in `harbor/steps.py` is hardcoded for the
 workflow-structured family and should not be applied to the other.
+
+### Q29. Does every pack declare taxonomy codes that actually exist?
+
+**No — one did not, and it went unnoticed until a rev2 rebuild forced a check.**
+
+`recency_bias_mini` declares `RBD-01`, `RBD-02` and `RM-11`. None of the three
+appear in `taxonomy/DSM-AE-v0.1-taxonomy.md`. An audit of all 24 packs against
+the 158 real codes found this is the only offender, so the damage is
+contained — but the class of error is worth recording.
+
+Why it matters beyond bookkeeping: pack→code declarations are what
+`reports/COVERAGE.md` counts, and Shield 1 of the defense (§blog 4.1, "the
+literature already treats these constructs as systematic") rests on every
+wired code tracing to a real taxonomy row with a Source column. A code that
+exists only in a pack file has no source, no literature anchor, and inflates
+the coverage denominator with a row nobody can check.
+
+**Fixed forward, not backward.** The rev2 packs declare only verified codes
+(`RM-01`, `RM-05`, `RM-08`, `SC-23`, `PC-15`) and a test enforces membership
+so the check cannot silently lapse again. `recency_bias_mini` (rev1) is left
+untouched deliberately — it is the comparison baseline for the seeding
+experiment, and changing it mid-experiment would invalidate the comparison.
+It should be corrected once that comparison is done.
+
+**Generalisable point.** This is the same shape as Q27 (a correct rule the
+caller can bypass) and the `apply_patch` path bug: a declaration nothing
+validates drifts silently. Anywhere the project asserts a cross-reference —
+pack to taxonomy, gate to anchor, instrument to syndrome — the assertion needs
+a test, or it is decoration.

@@ -6,16 +6,19 @@ from dsm_ae.packs.composite_fixture import CompositeFixturePack
 from dsm_ae.packs.coord_tax_mini import CoordTaxMiniPack
 from dsm_ae.packs.eval_gaming_mini import EvalGamingMiniPack
 from dsm_ae.packs.gate_discipline import GateDisciplinePack
+from dsm_ae.packs.gate_discipline_rev2 import GateDisciplineRev2Pack
 from dsm_ae.packs.handoff_mini import HandoffMiniPack
 from dsm_ae.packs.hello_metacog import HelloMetacogPack
 from dsm_ae.packs.injection_mini import InjectionMiniPack
 from dsm_ae.packs.loop_control import LoopControlPack
 from dsm_ae.packs.mas_verify_mini import MasVerifyMiniPack
 from dsm_ae.packs.memory_context import MemoryContextPack
+from dsm_ae.packs.memory_context_rev2 import MemoryContextRev2Pack
 from dsm_ae.packs.nfr_omit import NfrOmitPack
 from dsm_ae.packs.overeager_mini import OvereagerMiniPack
 from dsm_ae.packs.pii_safety import PiiSafetyPack
 from dsm_ae.packs.recency_bias_mini import RecencyBiasMiniPack
+from dsm_ae.packs.recency_bias_mini_rev2 import RecencyBiasMiniRev2Pack
 from dsm_ae.packs.role_confusion_mini import RoleConfusionMiniPack
 from dsm_ae.packs.sandbag_mini import SandbagMiniPack
 from dsm_ae.packs.session_overwrite_mini import SessionOverwriteMiniPack
@@ -53,6 +56,11 @@ _PACK_INSTANCES: list[IndicatorPack] = [
     RecencyBiasMiniPack(),
     SpecDriftMiniPack(),
     CompositeFixturePack(),
+    # rev2: state-seeded variants of packs whose rev1 gates saturate. Kept as
+    # separate registrations so rev1 stays available for A/B comparison.
+    RecencyBiasMiniRev2Pack(),
+    MemoryContextRev2Pack(),
+    GateDisciplineRev2Pack(),
 ]
 
 PACKS: dict[str, IndicatorPack] = {p.id: p for p in _PACK_INSTANCES}
