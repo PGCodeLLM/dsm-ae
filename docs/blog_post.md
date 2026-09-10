@@ -55,13 +55,17 @@ We believe that benchmaxxing is not the way forward to train models, but to trul
 
 The work consists of four contributions, in order of how well-evidenced they are:
 
-**1. A structural split between two benchmark families.** Agentic benchmarks
-are not one kind of thing, and conflating them was our own most expensive
-error. *Workflow-structured* families (SWE-bench-Pro, feat-bench) have a
-well understood and expected task sequence — plan → explore → implement → verify — and a binary
-oracle. *Reward-shaped* families (NL2Repo-Bench, DenovoSWE) have neither: no
-canonical workflow to deviate from, but a **graded** oracle. They need
-different analyses, and applying the wrong one destroys the signal. (§2)
+**1. A pipeline from observed behaviour to regression test, with its leaks
+labelled.** Real trajectories → atom/n-gram patterns → deterministic gates →
+mutation search. Some behaviours can be found in trajectory *shape* alone with
+no fixture and no oracle; a subset of those reduce to minimal Harbor tasks
+usable as regression indicators; and that reduction does **not** guarantee a
+mutated variant still gets caught, which is where mutation testing and
+MCTS-style search belong. The pipeline also has a ceiling: benchmark failure
+modes are far narrower than real ones, which is why we collect real user
+trajectories too. Within this, benchmarks split into *workflow-structured* and
+*reward-shaped* families that need different analyses — conflating them was
+our most expensive error. (§2)
 
 **2. The layered measurement approach: metric → behaviour → task outcome.**
 Most evaluation work lives entirely at the metric layer or entirely at the
@@ -360,12 +364,126 @@ fired once in 75 sessions, and the corpus truncates tool payloads, so a skip
 marker buried inside an edit is structurally invisible. That is a limitation,
 not a low rate.
 
-## 2. The structural split: two kinds of agentic benchmark
+## 2. From observed behaviour to regression test — and where it breaks
 
-This is the contribution we are most confident in, and it came out of an
-error we made ourselves.
+The examples in §1.5 were found by reading transcripts. That does not scale,
+and it is not repeatable. So the question this section answers is: **how do you
+get from "I noticed the agent doing something bad" to something you can run
+automatically on every model release?**
 
-### 2.1 The two families
+There is a pipeline, and it leaks at every stage. Being explicit about where it
+leaks is more useful than pretending it does not.
+
+```text
+  [1] real trajectories
+        ↓   atom / n-gram pattern matching
+  [2] observed behaviour patterns          ← repetitive tool calls, overthinking,
+        ↓   reduce to a minimal fixture       poll-babysitting
+  [3] deterministic gate / Harbor task     ← cheap, repeatable regression indicator
+        ↓   mutate and search
+  [4] does the gate still catch it?        ← MCTS / mutation testing
+        ↓
+  [5] evidence that a capability needs attention
+```
+
+### 2.1 Stage 1→2: patterns you can find without a fixture
+
+Some behaviours are visible in the *shape* of a trajectory alone, with no
+knowledge of what the task was. Represent a run as an ordered sequence of
+action atoms — `read_file`, `edit`, `search_repo`, `run_test` — and recurring
+n-grams become the unit of analysis (the approach procgrep takes; our
+implementation is `src/dsm_ae/atoms.py`).
+
+This is how you catch the §1.5 examples mechanically rather than by reading:
+
+| Pattern | Atom-level signature |
+|---|---|
+| repetitive tool calls | the same atom n-gram repeating with no state change between |
+| poll-babysitting | `run_code → run_code → run_code` with a sleep and no edit |
+| overthinking | long `think` runs relative to acting atoms |
+| read loops | `read_file` on a path already read, no intervening edit |
+
+The strength here is that it needs **no oracle and no fixture** — it works on
+any trajectory you have lying around, including production traffic. That is
+what let us find poll-babysitting at all.
+
+### 2.2 Stage 2→3: reducing a pattern to a gate
+
+Once a pattern is named, a *subset* of them can be reduced to a minimal
+reproducible Harbor task with a deterministic gate — a small fixture that
+elicits the behaviour and a check that fires when it occurs. That is what our
+packs are, and it is what makes them usable as **regression indicators**: cheap
+enough to run on every release, deterministic enough that a change in the
+result means something.
+
+Not everything survives this reduction. `poll-babysitting` needs a genuinely
+long-running background job to be worth doing, and a fixture small enough to
+run in seconds removes the very condition that produces the behaviour. Some
+behaviours only exist at a scale a smoke test cannot reach.
+
+### 2.3 Stage 3→4: reduction does not guarantee coverage
+
+Here is the part that is easy to skip and shouldn't be. A gate is written
+against the behaviour **as you observed it**. A model that fails a slightly
+different way — a *mutation* of the behaviour — can walk straight past a gate
+that was tuned to the original.
+
+Our own data says this bluntly: 81% of gates return an identical value for
+three gpt-5.6 variants at our highest-powered setting (§4.4). A gate that never
+varies cannot detect a variant of anything.
+
+This is exactly the problem mutation testing was invented for, and the
+argument for MCTS-style search over the fixture space: **perturb the task, and
+check the gate still fires.** A suite that catches no injected variant is
+inadequate no matter how well-motivated the construct behind it is (§4.1).
+We have not run this yet, and it is the cheapest experiment that would change
+our verdict (§4.5).
+
+### 2.4 The ceiling: benchmark failure modes are narrower than real ones
+
+Even a perfect version of the above has a ceiling, and it is worth stating
+plainly because it bounds what any benchmark-derived smoke test can claim.
+
+The failure modes available in SWE-bench-Pro and NL2Repo-Bench are **much
+narrower than the ways agents actually fail for real users**. Both benchmarks
+hand the agent a well-scoped task with a verifier attached. Neither can
+produce a 51-hour polling loop, because neither has a background job worth
+watching. Neither can produce 185 consecutive permission refusals, because
+neither runs under a user's permission configuration.
+
+We only found those by collecting **real trajectories from real users**
+(§1.5). That is not a supplement to benchmark analysis — for a whole class of
+behaviour it is the only source.
+
+### 2.5 What the pipeline is actually for
+
+So what do the smoke tests buy, if they cannot cover the whole space?
+
+They are a **framework for sorting evidence** about which model capabilities
+need attention for real-world usability — not a leaderboard, and not a
+substitute for running the real thing. Once a behaviour is isolated in a
+cheap, repeatable fixture, it becomes actionable in three different directions,
+and which one applies is itself diagnostic information:
+
+- **Curate better training data** — if the model genuinely lacks a capability.
+- **Train on more efficient trajectories** — if it has the capability but uses
+  it wastefully, as in overthinking or poll-babysitting.
+- **Fix the scaffold** — if the environment is what produced the failure. The
+  185-retry loop needs a tool that fails informatively and a way to surface
+  "I am blocked" to the user. No training run fixes that.
+
+That last point generalises past our own harness. A scaffold should be robust
+and efficient when interoperating with **models that were never finetuned on
+it** — which is the normal case for anyone building on top of a third-party
+model. Behaviour that only appears with an unfamiliar model is a scaffold
+design problem, and it is invisible to a benchmark that reports one number per
+model.
+
+### 2.6 Two benchmark families, and why the analysis differs
+
+One more thing complicates stage 1→2, and it cost us a real finding before we
+noticed it. The benchmarks we analyse are not one kind of thing, and the
+pattern-matching above has to be adapted to which kind you are holding.
 
 | | **Workflow-structured** | **Reward-shaped** |
 |---|---|---|
@@ -388,7 +506,7 @@ agent iteratively refining a repo toward an oracle's test suite has no
 behaviour "ill" presupposes a norm that does not exist. What *is* definable is
 **efficiency** and **verification discipline**, and those metrics turn out to carry signal.
 
-### 2.2 Thresholding continuous reward functions
+### 2.7 Thresholding continuous reward functions
 
 `HarborTrial.success` binarises at `reward >= 1.0`. On NL2Repo-Bench that is
 not a good metric: the reward is the *fraction* of the oracle repo's unit tests
@@ -400,7 +518,7 @@ that pass. Of 216 scoreable trials:
 
 Thresholding too high risks scoring a 0.98 identically to a 0.0. Likewise the score is informed by number of test cases a repo posesses and confounds if solvability were to be used as a measure of task difficulty. DenovoSWE proposes a weighted scheme and Difficulty Scoring Framework for this reason.
 
-### 2.3 What the continuous oracle shows
+### 2.8 What the continuous oracle shows
 
 Spearman rank correlation against the graded reward, with cluster-bootstrap
 CIs resampling *instances*
@@ -433,7 +551,7 @@ average reward 0.260 (n=35) against 0.464 for those that do (n=181) — but the
 association survives *within* the testers at ρ=+0.296. Proportionally more
 verification tracks higher reward.
 
-### 2.4 What this does not establish
+### 2.9 What this does not establish
 
 - `n_calls` and `distinct_files` are collinear (ρ=0.608). Treat them as one
   "sprawl" effect, not two independent findings.
