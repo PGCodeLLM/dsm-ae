@@ -1,26 +1,64 @@
 # Measuring Agent Capability Without Running the Whole Benchmark
 
-**DSM-AE (Diagnostic and Statistical Manual — Agentic Edition)**
+**DSM-AE (Diagnostic and Statistical Manual: Agentic Edition)**
 
 **Status:** research prototype · **AS_OF:** 2026-09 · sections marked
 **[UNDER CONSTRUCTION]** are not yet defensible and are labelled as such
 
 ---
 
+## Start here: two agents, same green checkmark
+
+Imagine you hand the same ticket to two coding agents. Both come back with a
+passing test suite. The benchmark scores them identically — one point each.
+
+The first one read three files, made a focused change, ran the tests, and
+stopped.
+
+The second one read the same file eleven times, edited it back and forth,
+wandered into four unrelated modules "while it was in there", ran `git
+checkout --` on something you had not committed yet, and finished forty
+minutes and twice the tokens later. It also touched **eleven files where three
+would have done**.
+
+If you have used a coding agent for real work, you have met the second one.
+And here is the thing worth sitting with: **on a correctness-only benchmark,
+those two runs are indistinguishable.** Both pass. The leaderboard cannot see
+the difference. But you can — in your API bill, in your review queue, and in
+how much you trust the thing next time.
+
+That gap is what this project is about. Not "which model scores highest", but
+*what actually happened during the run*, why it happened, and which parts of
+it were the model's doing versus the tooling you wrapped around it.
+
+We are not claiming the second agent is worse at programming. It may be
+equally capable and simply badly behaved — and those need different fixes. A
+capability gap needs better training data. A behavioural problem often needs a
+better scaffold: a permission prompt, a tool that fails loudly instead of
+silently, a system prompt that says "read before you patch".
+
+Telling those two apart is a diagnosis problem, and that is the work here.
+
+---
+
 ## Abstract
 
-Running a long-horizon agentic benchmark is expensive. On our own hardware a
-single SWE-bench-Pro instance takes 1–2 hours, and 43 tasks across two models
-is about a day of wall-clock. A deterministic pack battery takes minutes. The
-question this project exists to answer is whether the cheap thing can stand in
-for the expensive one — and if so, what makes a *good* cheap thing.
+Running a long-horizon agentic benchmark is expensive. A
+single SWE-bench-Pro instance takes 1–2 hours on a DGX spark machine, and 43 tasks across two models
+is about a day of wall-clock. A deterministic smoke test takes minutes. The
+question this project exists to answer is whether the cheap smoke test can stand in
+for the expensive one — and if so, what makes a *good* cheap smoke test in the world of agentic models.
 
-Four contributions, in decreasing order of how well-evidenced they are:
+The name is borrowed from the Diagnostic and Statistical Manual from APA, and the evidenced diagnosis methodology inspires this work. It is not a direct analog of diagnosing humans subjects but some para-human aspects/behaviours of agentic models can be studied using this framework.
+
+We believe that benchmaxxing is not the way forward to train models, but to truly understand where and how models fail at different levels in real world tasks. Only then, practitioners can address these systematically by building better scaffolds and sourcing better data to train models in a principled way, that are fit to be used in various domains. 
+
+The work consists of four contributions, in order of how well-evidenced they are:
 
 **1. A structural split between two benchmark families.** Agentic benchmarks
 are not one kind of thing, and conflating them was our own most expensive
 error. *Workflow-structured* families (SWE-bench-Pro, feat-bench) have a
-canonical sequence — plan → explore → implement → verify — and a binary
+well understood and expected task sequence — plan → explore → implement → verify — and a binary
 oracle. *Reward-shaped* families (NL2Repo-Bench, DenovoSWE) have neither: no
 canonical workflow to deviate from, but a **graded** oracle. They need
 different analyses, and applying the wrong one destroys the signal. (§2)
@@ -86,17 +124,17 @@ is not measuring anything.
 
 ---
 
-## 1. Why the linkage layer is the hard part
+## 1. Linking metrics to task outcomes: the hard part
 
 ### 1.1 The two easy things
 
 **Measuring a metric is easy.** Write a gate: did the agent delete `.env.old`?
 Did the final answer match the tool result? Did coverage of the required-fact
 set grow on this step? These are `DET_EXACT` / `DET_TRACE` / `DET_EXEC` checks
-over a trajectory. They are cheap, reproducible, and utterly uninformative on
+over a trajectory. They are cheap, reproducible, and but uninformative on
 their own.
 
-**Naming a syndrome is easy** — dangerously easy. Any decent literature review
+**Naming a syndrome is easy**. Any decent literature review
 gives you a vocabulary: overeager agency, tool integrity deficit, sycophancy,
 handoff collapse, spec drift. DSM-AE has 158 such patterns. Naming them costs
 nothing and proves nothing. A taxonomy with no outer oracle is a vocabulary, not
@@ -113,13 +151,13 @@ task oracle that is **not** one of your own gates — hidden tests, a gold patch
 a human accept bit — plus both fail *and* success trajectories on the same task
 under the same scaffold.
 
-The naive shortcuts both fail:
+Naive shortcuts which failed; traps to avoid:
 
-1. **Assume every ill-behaviour hurts every task.** False on our own data. On
+1. **Assume every ill-behaviour hurts every task.** False: On
    `overeager_mini`, procedure n-grams did not separate pass from fail at all
    (pass↔fail JSD 0.04, barely above the same-condition noise floor of ~0.06);
    on `tool_integrity_tier2` they did (0.35). A model can be OASD-clean on the
-   cleanup toy and still 0/10 on the tool-integrity tier-2 arm. Behaviours are
+   cleanup toy example and still 0/10 on the tool-integrity tier-2 arm. Behaviours are
    **conditionally** causal.
 
    But "did not change the outcome" is not the same as "did not matter" — and
@@ -127,7 +165,7 @@ The naive shortcuts both fail:
 2. **Design the task suite from the taxonomy first.** Then you only rediscover
    the toys you planted, and the mapping is circular.
 
-The honest order is **task-first, taxonomy-second**:
+The correct order is **task-first, taxonomy-second**:
 
 ```text
   representative tasks
@@ -149,23 +187,27 @@ Not a score. Not a podium. A sentence of this shape:
 > of fails carry unrecovered REGRESS (OASD-shaped) and 25% carry SPD (held-out
 > spec violated). Successes almost never show unrecovered REGRESS.
 
-That is fitness-to-operate **on T**. It is a different object from "OASD present
-on a cleanup toy," and it is the object an org can actually map onto a policy
-decision: may this model auto-run code review, cleanup, on-call triage — or does
-it need a human gate.
+That is the definition of **fitness-to-operate on T**. It is a different object from "OASD syndrome present on a toy scenario/task," and it is the object an organization can actually map onto a policy decision: may this model auto-run code review, cleanup, on-call triage on its own, or is it too weak and requires a human gate?
 
 ---
 
 ### 1.4 Functional correctness is not the only thing an ill-behaviour costs
 
-A behaviour can leave the pass/fail outcome untouched and still be expensive.
-Token spend, wall-clock, and the blast radius left in the repository are
-*non-functional* requirements, and on our data they are where several
-behaviours actually show up.
+This is the second agent from the opening, measured.
 
-The test: hold the outcome **fixed** — look only at runs that *succeeded* —
-and ask what the behaviour cost. Completion tokens, opencode bundle,
-cluster-bootstrap CIs resampling instances:
+In software engineering we separate *functional* requirements — does it do the
+right thing — from *non-functional* ones: how fast, how expensive, how
+maintainable. Agent evaluation has been almost entirely functional. A
+benchmark asks "did the tests go green" and stops.
+
+But tokens are real money, minutes are real waiting, and the diff lands in a
+real person's review queue. So we asked a simple question: **take only the
+runs that succeeded, and see what these behaviours cost anyway.**
+
+Holding the outcome fixed matters. Comparing successes against failures would
+just tell us that failing is expensive. Comparing successes to successes
+removes that. Here is what agents spent in completion tokens when a behaviour
+was present versus absent — every run in both groups having solved the task:
 
 | Behaviour | n | median tokens with | without | ratio | 95% CI |
 |---|---:|---:|---:|---:|---|
@@ -174,13 +216,17 @@ cluster-bootstrap CIs resampling instances:
 | `scope_creep` | 54 | 29,965 | 19,168 | **1.56×** | [1.28, 2.00] |
 | `destructive_command` | 29 | 25,242 | 20,198 | 1.25× | [1.08, 1.61] |
 
-**Every interval excludes 1.0, on runs that all produced a correct result.**
-A correctness-only evaluation scores these runs identically to the clean ones.
-The same pattern holds in steps rather than tokens (`scope_creep` 2.06×,
-`thrash_edit` 1.65×, `read_loop` 1.71× among passing runs).
+Read the `read_loop` row as: among runs that *all succeeded*, the ones that
+kept re-reading the same file burned about **1.74× the tokens** of the ones
+that did not, and the confidence interval [1.40, 1.96] never touches 1.0 — so
+this is not noise. Every row behaves the same way, and the pattern holds in
+step counts too.
 
-The latent cost is the more interesting one. Counting distinct files edited by
-runs that **succeeded**:
+**A correctness-only evaluation scores every one of these runs identically to
+a clean run.** That is the whole point.
+
+Now the cost that outlives the session. Counting how many distinct files each
+*successful* run left modified:
 
 | Behaviour | median files edited | vs without | ratio |
 |---|---:|---:|---:|
@@ -188,13 +234,23 @@ runs that **succeeded**:
 | `destructive_command` | 5 | 3 | 1.67× |
 | `thrash_edit` | 4 | 3 | 1.33× |
 
-An overeager agent resolves the issue *and* leaves 11 modified files where 3
-would do. The benchmark records a pass. The reviewer inherits a diff nearly
-four times larger, and whatever maintainability cost comes with it. Nothing in
-a resolved/not-resolved oracle can see that.
+An overeager agent fixes the bug **and** leaves eleven modified files where
+three would have done. The benchmark records a pass. Someone then has to
+review that diff, and in six months someone has to understand why those eight
+extra files changed. None of that is charged to the agent's score.
 
-This is why the diagnostic frame is not redundant with a benchmark score. An
-ill-behaviour's effects fall into at least three classes:
+Work such as SlopCodeBench measures how long an agent can keep iteratively
+developing a growing repository before correctness collapses. Our work aims at
+the behaviours *leading up to* that point — the ones already accumulating cost
+while the tests are still green.
+
+This is also why chasing leaderboard numbers can quietly make the product
+worse. An agent tuned purely for pass rate has no reason not to overthink,
+sprawl, or re-read: those cost the user, not the metric. A model that thinks
+hard about a one-line change scores well and is tiring to work with.
+
+The effects of a badly-behaved run fall into three classes, and only the first
+is visible to a benchmark:
 
 - **Immediate** — changes the outcome of the task at hand. This is all a
   binary oracle can measure.
@@ -222,36 +278,33 @@ error we made ourselves.
 | Examples | SWE-bench-Pro, feat-bench | NL2Repo-Bench, DenovoSWE |
 | Canonical phase sequence | yes — plan → explore → implement → verify | **no** |
 | Oracle | binary (resolved / not) | **graded** (fraction of oracle tests passing) |
-| What "ill-behaviour" means | deviation from the expected workflow | possibly *undefined* |
-| Right analysis | sentinel events + step attribution | trend ↔ reward correlation |
+| What "ill-behaviour" means | deviation from the expected workflow | distance from oracle verifiers, possibly *undefined* |
+| Analysis Approach | sentinel events + step attribution | trend ↔ reward correlation |
 
 The distinction matters because the *same* analysis applied to the wrong
 family produces nothing, or worse, produces an artifact.
 
 For workflow-structured tasks, phases are real and observable: the first edit
 opens implementation, the first test opens verification. "Never verified" is a
-meaningful accusation because verification is a step the workflow expects.
+meaningful defect because verification is a step the workflow expects.
 
 For reward-shaped tasks there is no canonical sequence to deviate from. An
 agent iteratively refining a repo toward an oracle's test suite has no
-"correct" workflow — it has a score that goes up or down. Calling any of its
+"correct" workflow — it has a score that goes up or down with test coverage. Calling any of its
 behaviour "ill" presupposes a norm that does not exist. What *is* definable is
-**efficiency** and **verification discipline**, and those turn out to be
-exactly what carries signal.
+**efficiency** and **verification discipline**, and those metrics turn out to carry signal.
 
-### 2.2 The error, and what it cost
+### 2.2 Thresholding continuous reward functions
 
 `HarborTrial.success` binarises at `reward >= 1.0`. On NL2Repo-Bench that is
-simply wrong: the reward is the *fraction* of the oracle repo's unit tests
+not a good metric: the reward is the *fraction* of the oracle repo's unit tests
 that pass. Of 216 scoreable trials:
 
 - **162 fall strictly between 0 and 1**
 - across **154 distinct reward values**
 - only **14** sit at exactly 1.0
 
-Thresholding scores a 0.98 identically to a 0.0. We had been reporting a
-">93% failure rate" for this family and attributing it to task difficulty. It
-was **largely an artifact of our own binarisation**.
+Thresholding too high risks scoring a 0.98 identically to a 0.0. Likewise the score is informed by number of test cases a repo posesses and confounds if solvability were to be used as a measure of task difficulty. DenovoSWE proposes a weighted scheme and Difficulty Scoring Framework for this reason.
 
 ### 2.3 What the continuous oracle shows
 
@@ -290,7 +343,7 @@ verification tracks higher reward.
 
 - `n_calls` and `distinct_files` are collinear (ρ=0.608). Treat them as one
   "sprawl" effect, not two independent findings.
-- Both are **endogenous**: an agent doing badly keeps working, so length
+- Both are **endogenous**: an agent that is doing badly keeps grinding away working, so trajectory length
   partly reflects difficulty rather than causing failure. This is a *distress
   signal*, not a demonstrated cause.
 - Rank correlation only. The reward is a fraction of one particular repo's
@@ -358,7 +411,7 @@ it reads as 0.987 — **the representation destroys exactly the signal you
 want.** Sentinels are therefore recorded as *events with a step index and an
 evidence pointer*, never averaged into a rate.
 
-These five labels are **ours**, not taken from a published taxonomy. They are
+These five labels are **ours**, not taken from any existing published taxonomy. They are
 operationalisations of categories the literature already treats as systematic
 — `never_verified` sits closest to MAST's task-verification failures and
 TRAIL's goal deviation, `ungrounded_patch` to AgentErrorTaxonomy's
@@ -387,7 +440,7 @@ identify the models that will do badly on the real benchmark?
 imported into NLP evaluation by Lalor et al. (EMNLP 2016) and Rodriguez et al.
 (ACL 2021). The sharp version: *an item everyone passes has discrimination ≈ 0
 and carries zero information regardless of how well-motivated the construct
-behind it is.* Under IRT such a gate is **not a weak item — it is not an item
+behind it is.* Under IRT such a gate is **not a weak item: it is not an item
 at all.**
 
 **Mutation adequacy.** DeMillo, Lipton & Sayward (1978); the coupling-effect
