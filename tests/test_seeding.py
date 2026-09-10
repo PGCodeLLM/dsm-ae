@@ -240,7 +240,14 @@ def test_shipped_fixture_passes_an_independent_audit():
     path = fixture_path()
     if not path.is_file():
         pytest.skip("seed fixture not built")
-    blob = json.dumps(json.loads(path.read_text(encoding="utf-8"))["pools"])
+    # Audit the TURN TEXT only. `meta.session_id` is deliberate provenance
+    # (blog Appendix A) so the grounding claim is checkable; it is a corpus
+    # key, not content, and must not be scrubbed away. Everything the model
+    # actually sees is below.
+    pools = json.loads(path.read_text(encoding="utf-8"))["pools"]
+    turns = [t for items in pools.values() for it in items for t in it["turns"]]
+    blob = json.dumps(turns)
+    assert turns, "fixture has no turns to audit"
     forbidden = {
         "email": r"[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}",
         "home_path": r"/(?:home|Users)/(?!<)[A-Za-z0-9._\-]+",

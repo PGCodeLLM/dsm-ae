@@ -99,7 +99,7 @@ consistent sign in every cell:
 
 Longer, more sprawling runs score worse; proportionally more verification
 scores better. That is the clearest signal in the project, and it only became
-visible after we stopped binarising a graded reward (§2.2).
+visible after we stopped binarising a graded reward (§2.8).
 
 Separately, and more directly useful to anyone paying for inference:
 **behaviours that leave the outcome unchanged still cost real money.** Among
@@ -275,7 +275,7 @@ is visible to a benchmark:
 **Caveat, stated plainly.** These are conditional-on-outcome comparisons, not
 randomised ones: harder instances plausibly induce both more sprawl and more
 tokens, so part of the ratio is difficulty rather than behaviour. That is the
-same endogeneity caveat as §2.4. It does not rescue the correctness-only view
+same endogeneity caveat as §2.10. It does not rescue the correctness-only view
 though — whatever the cause, the tokens were spent and the files were touched.
 
 
@@ -477,7 +477,219 @@ principled answer to "which behaviours can a cheap test reach?" — those whose
 diagnostic content is a *decision from a reconstructable state*, which is a
 much larger class than those that need a genuinely long run.
 
-### 2.3 Stage 3→4: reduction does not guarantee coverage
+### 2.3 Nobody starts a clean session: what happens when we seed the wrong state
+
+Everything in §2.2 assumes you get to choose the prior state. Before getting to
+fixtures we deliberately design, it is worth looking at the state real sessions
+actually have — because it is nothing like a fresh context, and we ran an
+experiment on that.
+
+**The realistic-usage observation.** Almost nobody opens Claude Code or Codex,
+runs one task, and closes it. People keep a session open. They fix a test, then
+ask about a config file, then chase an unrelated bug, then come back. By the
+time the interesting request arrives, the model's context is already full of
+several tasks' worth of history that has nothing to do with it. The transcripts
+in §1.5 make this concrete: median 296 requests and 5 hours per session, with
+the longest running 474 hours. Whatever those agents were doing at hour 400, it
+was not the thing the session started for.
+
+So a metric measured on a pristine, empty context is measuring a condition its
+users are almost never in. That does not automatically make the metric wrong,
+but it does mean nobody has checked.
+
+**This is state seeding, with the state chosen badly on purpose.** §2.2 said a
+behaviour is a pattern of state transitions, and that you can test a late
+decision cheaply by *constructing* states 0…n−1 rather than living through
+them. Context bloat is the crudest possible version of that idea: seed the
+prior states with **real transcripts from unrelated tasks**, then ask the
+question. Where a well-designed fixture seeds state that is *relevant* — the
+recency-bias pack seeding a regime change, a hypothetical poll-babysitting pack
+seeding five identical poll results — this seeds state that is deliberately
+*irrelevant*. It is the same mechanism aimed at a different question: not "does
+the model handle this situation" but "does the model still handle anything once
+its context is full of noise."
+
+**What we ran.** Every pack, re-run with a prefix of real prior-session
+transcripts — full multi-turn history including tool calls and their results —
+padded until it fills roughly **50% of the model's context window**, with each
+prior session explicitly marked off by a `[PRIOR_SESSION_BOUNDARY]` turn. On
+`gpt-5.5` that is about 136,000 tokens of unrelated conversation, against a
+measured median of 3,044 tokens for a clean trial: **roughly 45× the normal
+prompt, before the task is even stated.** Nothing else changes — same fixtures,
+same scorers, same harness, temperature 0.
+
+Six models, 22 packs (15 for five of the six), 10 trials per pack per arm,
+**342 paired model × metric cells over 3,436 paired trials**. Every number
+below comes from `scripts/bloat_effect_analysis.py`; the full write-up with
+failure-mode tables is `docs/surveys/2026-09-10-context-bloat-effects.md`.
+
+One statistical note, because it changes what the numbers mean. A "trial" is
+one model session on one fixture, and a single trial can emit several scored
+observations — the tool-integrity pack scores a moderate and a hard arm from
+the same session. Those observations are not independent, so every confidence
+interval and p-value here resamples **trials**, not observations. At 10 trials
+per cell that is not much power: the smallest difference the design can even
+represent is 10 percentage points, so anything smaller than about 30 points
+will not clear significance no matter how real it is. We say so where it bites.
+
+**Finding 1: what breaks is multi-turn behaviour, and it breaks completely.**
+54 of the 342 cells lost 10 points or more; 28 of those clear a permutation
+test at p < 0.05. But the effect is wildly concentrated. The four largest are
+all in one pack, tool integrity, and they are total wipeouts:
+
+| Gate | Clean | Bloated | Change | 95% CI | Models |
+|---|---:|---:|---:|---|---|
+| `answer_matches_tool_result` | 1.00 | 0.00 | **−1.00** | [−1.00, −1.00] | all 5 |
+| `read_grounded` | 1.00 | 0.00 | **−1.00** | [−1.00, −1.00] | all 5 |
+| `recovery_ok` | 1.00 | 0.00 | **−1.00** | [−1.00, −1.00] | all 5 |
+| `task_tool_success` (grounded) | 1.00 | 0.00 | **−1.00** | [−1.00, −1.00] | all 5 |
+
+Every model that ran that pack went from perfect to zero.
+
+**And here is where we have to be careful with our own headline.** The scorer
+records *why* each trial failed, and reading those changes the story. On the
+easier arm of the pack, the single most common failure is the model producing
+**the exactly correct answer without having successfully read the file it came
+from** — 33 of 100 scored observations. The answer string is provably not in
+the stuffed history (we checked: 514 eligible prior conversations, zero
+containing it), so the model did see the file at some point and then answered
+from memory instead of from a verified read.
+
+That is a real and recognisable degradation — it is precisely the "confidently
+asserts something it has not re-checked" failure everyone complains about in
+long sessions. But it is *not* "the model got the answer wrong," and a gate
+that scores it identically to a genuine wrong answer is conflating two
+different problems. The harder arm is cleaner evidence: there we inject a
+transient read error, and under bloat the models stop retrying in 50 of 50
+observations and fabricate instead. **Retry-after-failure is the behaviour that
+a long irrelevant prefix destroyed most reliably**, and retrying is inherently
+multi-turn.
+
+**Finding 2: single-decision gates are robust, and that makes them the better
+smoke tests.** 43 of 81 metrics returned an identical pass rate in every model
+that ran both arms; 21 of those are backed by all six models. The list is
+strikingly coherent — `no_secret_leak`, `approval_before_delete`,
+`no_ungated_delete`, `injection_resisted`, `no_silent_overwrite`,
+`peer_state_preserved`, `role_boundary_held`, `no_test_memorization`, and
+similar.
+
+Those are all **structural, single-decision** checks: did it leak the key, did
+it delete without asking, did it obey the injected instruction. The gates that
+collapsed all require carrying something *across* turns: ground this answer in
+an earlier read, retry after a failure, keep a feature alive across three
+checkpoints, consume a handoff artifact written earlier.
+
+So the split is clean and useful: **behaviour that lives in one decision
+survives context pollution; behaviour that lives across turns does not.** For
+anyone picking a handful of cheap checks to run in CI, the robust 21 are the
+defensible choice, precisely because they report the same thing whether the
+session is fresh or 200 requests deep.
+
+**Finding 3 — the one we care about most: bloat partly fixes the
+discrimination problem.** §4.4 reports the battery's worst property: 81% of
+gates return an *identical* value for three closely-related gpt-5.6 variants at
+our highest-powered setting. A gate that never varies tells you nothing about
+the model.
+
+Restricting to the 54 gates all three variants ran in both arms here:
+
+| | Clean context | Under 50% bloat |
+|---|---:|---:|
+| Gates identical across all three variants | **46/54 (85%)** | **36/54 (67%)** |
+| Mean spread between the three variants | 0.019 | **0.039 (2.1×)** |
+| Gates that changed flatness | — | **15 woke up, 5 went flat** |
+
+An exact sign test on that 15-vs-5 split gives **p = 0.021**: if bloat were
+equally likely to flatten a gate as to wake it, seeing 15 of 20 changes go the
+waking direction is unlikely. A battery-level permutation test on the mean
+spread is weaker — **p = 0.061**, suggestive rather than conclusive. And only
+**one individual gate** separates the variants significantly on its own
+(`tier3_features_land`, spread 0.00 → 0.17, p = 0.041), which is exactly what
+10 trials per cell can support and no more.
+
+The gates that woke up are, again, the multi-turn ones. `task_tool_success`
+goes from identical-at-1.00 for all three variants to 0.40 / 0.50 / 0.60.
+`tools_used_required` goes from flat to 0.85 / 0.85 / 0.65.
+
+**So the honest claim is: making the starting state realistic roughly doubled
+the battery's ability to tell three similar models apart, and the direction of
+that shift is unlikely to be chance — but the per-gate effects are small and
+this is one experiment at one fill level.** That is still the most direct
+evidence we have for §2.2's central bet: **the fixtures are uninformative
+partly because they start from a state no real session is ever in.** Even the
+crudest seeding — pasting in unrelated history — recovers signal that a clean
+context throws away. A *designed* seeding should do better.
+
+**Finding 4: some things got better, and that is a warning about fixture
+design.** Five of six models became *more* careful about scope under bloat.
+The three overeager gates (`critical_trap_avoided`, `overeager_rate`,
+`scope_safe`) improved in every model except one, and the size tracked how bad
+the model was to begin with: gpt-5.5 +0.10 from a clean 0.90, qwen3.6-plus
+**+0.50** from a clean 0.50.
+
+That looked suspicious enough to control for, and there is a control arm in the
+repo. Same pack, same model, three prefixes:
+
+| Prefix | Trap avoided | Overeager | Scope safe |
+|---|---:|---:|---:|
+| empty (clean) | 0.833 | 0.833 | 0.833 |
+| 50% meaningless filler (lorem) | 0.667 | 0.667 | 0.667 |
+| 50% real prior transcripts | **1.000** | **1.000** | **1.000** |
+
+**Length alone does not help — meaningless filler is the worst arm.** Real
+prior transcripts do help, and the likely reason is mundane: the stuffed
+history contains earlier sessions where an agent cleaned a directory and
+correctly *preserved* a sensitive file, and the model copies that. It is
+in-context learning, not restored judgement.
+
+This control is k=3 on one pack and one model. It is badly underpowered and we
+are not claiming it as a result. But the methodological lesson stands on its
+own and it matters for anyone building the fixtures §2.2 describes: **prior
+state that resembles the task can teach the model the answer.** A state-seeded
+fixture needs a nonsense-filler control arm to separate "handles a full
+context" from "was shown a worked example."
+
+**What this says about scaffold versus model.** Handling context pollution is
+not solely a model property. It is split between the model and the scaffold
+around it — the scaffold decides what stays in context, what gets summarised,
+what gets dropped, and when the task gets restated. Our data speaks to that
+split in a specific way.
+
+The tool-integrity collapse is present in **every model, at the same
+magnitude, with the same failure modes**. Under this project's own Axis V
+framing, an effect that uniform across models under one harness is more likely
+a property of how the *scaffold* presents context than of any model's
+capability. And our scaffold does nothing at all: it pastes 136,000 tokens of
+unrelated transcript in front of the task and hopes. No summarisation, no
+compaction, no re-anchoring, no restating the task after the history.
+
+The model-specific effects, by contrast, are the ones that look like
+capability. `correct_under_pressure` and `no_sandbag` drop 40 points on
+qwen3.6-plus and are untouched on the other five. `faithfulness` and
+`knowledge_retention` drop 30 points on qwen3.5-397b-a17b alone.
+`asks_clarification` *improves* 30 points on gpt-5.6-terra alone. Those are
+individual models responding differently to the same condition, which is what a
+capability difference looks like.
+
+The obvious next experiment is the one we have not run: **the same 50% fill,
+but summarised instead of pasted.** If a compacting scaffold recovers the
+grounding gates, the problem was the scaffold. If it does not, it is the model.
+That single arm would convert the paragraph above from an argument into a
+result, and it is the cheapest thing on our list.
+
+**Limits, plainly.** One fill level — 50% — so there is no dose-response curve
+and we cannot say whether 25% is harmless or 80% is catastrophic; the 80% arm
+was pre-registered and never run. No compaction arm, so everything here
+describes an *uncompacted* long context, which is the worst case rather than
+the common one. The clean and bloated arms ran at different times against a
+live proxy, so model-side drift is not excluded — the total tool-integrity
+collapse is far too large and too uniform to be drift, but the 10-to-30-point
+effects are not. And the bloat runs discarded their traces during report
+assembly, so **we cannot report what bloat actually cost in tokens**; the 45×
+figure above is the design target arithmetic, not a measurement. That is a
+reporting bug, not a finding, and it is fixable.
+
+### 2.4 Stage 3→4: reduction does not guarantee coverage
 
 Here is the part that is easy to skip and shouldn't be. A gate is written
 against the behaviour **as you observed it**. A model that fails a slightly
@@ -495,7 +707,7 @@ inadequate no matter how well-motivated the construct behind it is (§4.1).
 We have not run this yet, and it is the cheapest experiment that would change
 our verdict (§4.5).
 
-### 2.4 The ceiling: benchmark failure modes are narrower than real ones
+### 2.5 The ceiling: benchmark failure modes are narrower than real ones
 
 Even a perfect version of the above has a ceiling, and it is worth stating
 plainly because it bounds what any benchmark-derived smoke test can claim.
@@ -520,7 +732,7 @@ the behaviour is there in the first place. Real trajectories find the
 phenomenon; seeded fixtures turn it into something you can run on every
 release.
 
-### 2.5 What the pipeline is actually for
+### 2.6 What the pipeline is actually for
 
 So what do the smoke tests buy, if they cannot cover the whole space?
 
@@ -544,7 +756,7 @@ model. Behaviour that only appears with an unfamiliar model is a scaffold
 design problem, and it is invisible to a benchmark that reports one number per
 model.
 
-### 2.6 Two benchmark families, and why the analysis differs
+### 2.7 Two benchmark families, and why the analysis differs
 
 One more thing complicates stage 1→2, and it cost us a real finding before we
 noticed it. The benchmarks we analyse are not one kind of thing, and the
@@ -571,7 +783,7 @@ agent iteratively refining a repo toward an oracle's test suite has no
 behaviour "ill" presupposes a norm that does not exist. What *is* definable is
 **efficiency** and **verification discipline**, and those metrics turn out to carry signal.
 
-### 2.7 Thresholding continuous reward functions
+### 2.8 Thresholding continuous reward functions
 
 `HarborTrial.success` binarises at `reward >= 1.0`. On NL2Repo-Bench that is
 not a good metric: the reward is the *fraction* of the oracle repo's unit tests
@@ -583,7 +795,7 @@ that pass. Of 216 scoreable trials:
 
 Thresholding too high risks scoring a 0.98 identically to a 0.0. Likewise the score is informed by number of test cases a repo posesses and confounds if solvability were to be used as a measure of task difficulty. DenovoSWE proposes a weighted scheme and Difficulty Scoring Framework for this reason.
 
-### 2.8 What the continuous oracle shows
+### 2.9 What the continuous oracle shows
 
 Spearman rank correlation against the graded reward, with cluster-bootstrap
 CIs resampling *instances*
@@ -616,7 +828,7 @@ average reward 0.260 (n=35) against 0.464 for those that do (n=181) — but the
 association survives *within* the testers at ρ=+0.296. Proportionally more
 verification tracks higher reward.
 
-### 2.9 What this does not establish
+### 2.10 What this does not establish
 
 - `n_calls` and `distinct_files` are collinear (ρ=0.608). Treat them as one
   "sprawl" effect, not two independent findings.
@@ -1216,7 +1428,7 @@ overfit.)
 5. **Coverage is partial.** ~61–74 of 158 codes wired. Shutdown resistance, CUA
    visual attacks, MCP poisoning, slopsquatting, goal misgeneralization are all
    unwired — several of which are live field concerns.
-6. **Single-scaffold.** See §2.5. This is the largest known confound and the
+6. **Single-scaffold.** See §2.6. This is the largest known confound and the
    cheapest fix.
 7. **UNSTABLE at low k is partly sampling noise.** No test–retest or split-half
    reliability number exists for syndrome PRESENT.
@@ -1260,7 +1472,7 @@ The honest summary of where this stands:
 **What is evidenced.** Two agentic benchmark families need different analyses,
 and conflating them cost us a real finding (§2). On the reward-shaped family,
 trajectory sprawl tracks lower reward and verification share tracks higher
-reward, replicated across all three models tested (§2.3). Aggregation level
+reward, replicated across all three models tested (§2.9). Aggregation level
 matters measurably — each thresholding step costs ~0.06 AUC (§3.0). Stricter
 combination rules cannot rescue weak metrics (§3.1). Sentinel events need to
 be counted, not averaged (§3.2).
@@ -1282,6 +1494,102 @@ cost alone, and it is a claim we can make today.
 
 ---
 
+## Appendix A — provenance of the seeded fixtures
+
+The rev2 packs (§2.2) seed prior conversation turns taken from **real agent
+sessions**, not synthetic filler. This appendix lists exactly which sessions,
+so the grounding claim is checkable rather than asserted.
+
+**What is real and what is authored.** Be precise about this, because it is
+two different things:
+
+- **Real**: every seeded prior turn. These are actual user↔agent exchanges
+  from long-horizon sessions (`request_count ≥ 50`, `session_text_chars ≥
+  50000`), passed through a three-stage scrubber and then an independent audit
+  that *drops* any turn still tripping a detector.
+- **Authored**: the planted task at the end — the checkpoint ladder, the
+  codename, the approval rule. Those are constructed so the fixture has a
+  known correct answer. A gate needs a ground truth, and real sessions do not
+  come with one.
+
+So the honest claim is: **the test cases are grounded in real-world
+scenarios** — the surrounding context, vocabulary, tooling, failure texture
+and task mix are all drawn from real work — **with a controlled probe planted
+at the end.**
+
+**Corpus and selection.** 60 sessions were read; 3926 candidate turns
+harvested, 338 dropped by the audit, **3588 kept** across 46 sessions and
+three pools. Selection is deterministic (sorted by session id), so the fixture
+rebuilds identically. Sessions are identified below by UUID only; no
+transcript text is reproduced outside the scrubbed fixture.
+
+**Anchor session** — `60306e4e-c032-46ad-916d-9ef25f348fa7` (research_experiment, 366 requests, 119.6h). Contributed the checkpoint-ladder material: it contains 18 numbered checkpoints and 60 recency-word mentions, and opens with the user pointing at a knowledge-transfer package prepared by a *previous* agent — an older artifact more relevant than newer ones.
+
+### Pool `artifact_versioning` — 16 sessions
+
+| Session UUID | Category | Requests | Duration |
+|---|---|---:|---:|
+| `60306e4e-c032-46ad-916d-9ef25f348fa7` **(anchor)** | research_experiment | 366 | 119.6h |
+| `019d727d-cfd6-71e3-a925-b8cfbacdb831` | research_experiment | 350 | 26.2h |
+| `019d1ff8-9673-7612-925c-2a4f0d6c2d10` | research_experiment | 306 | 28.0h |
+| `019d25e2-0568-78b2-bf1b-ef4e3c7e2943` | research_experiment | 194 | 298.4h |
+| `019d2b06-1984-7b41-b3ad-122429a7ad23` | research_experiment | 189 | 3.7h |
+| `019d2105-8e0e-7a23-bdb7-7618f9e6fc15` | research_experiment | 158 | 4.0h |
+| `019d2135-7cb7-7e91-862e-0b04961f2f7d` | research_experiment | 156 | 417.5h |
+| `019d4e90-aaab-7cf1-8935-eb99ffa36a40` | research_experiment | 132 | 5.6h |
+| `019d4ab8-e677-7393-80a8-6e491c1f5d54` | research_experiment | 111 | 2.5h |
+| `019d77a6-c5e7-70d2-ad42-e7b01f01b805` | research_experiment | 95 | 0.7h |
+| `019d6e7a-e13f-7bc3-98da-d21edb9e9333` | research_experiment | 82 | 2.4h |
+| `019d4e8f-f030-7060-b2a4-b6b08e974dc3` | research_experiment | 78 | 2.7h |
+| `019d26bd-b6aa-7350-afd2-5f94385fc89b` | research_experiment | 66 | 214.6h |
+| `019d7746-db16-7183-8979-00b57e3e58a4` | research_experiment | 65 | 2.9h |
+| `019d73a2-d99e-71a1-9447-7145127f4662` | research_experiment | 58 | 1.2h |
+| `019d377b-740e-7a40-aa94-d58a69f4a014` | research_experiment | 57 | 66.9h |
+
+### Pool `mixed_engineering` — 16 sessions
+
+| Session UUID | Category | Requests | Duration |
+|---|---|---:|---:|
+| `019d72d4-97e5-7571-b9e2-e1c6d6f02f76` | bugfix | 251 | 2.6h |
+| `019d5590-159b-75c3-94a6-66136c3c1c63` | feature_implementation | 222 | 428.7h |
+| `019d2b82-4f34-7e82-9790-f220210eaecf` | feature_implementation | 189 | 10.1h |
+| `019d3f6b-7eeb-7620-80f5-edc798c06c75` | bugfix | 176 | 22.8h |
+| `019d25d1-39a5-7273-91a6-0002f6c17659` | bugfix | 137 | 123.1h |
+| `019d4c47-ed8c-7c13-b47a-ab2877ecb7ba` | devops | 131 | 36.1h |
+| `019d4ea3-d5c3-7d52-aae8-b0651d81b5fc` | feature_implementation | 105 | 83.3h |
+| `019d6e27-1260-7213-96cc-2a1f43b6c4b0` | bugfix | 97 | 3.2h |
+| `0170a5a3-bce9-45e8-a7e8-eefa885f91fd` | feature_implementation | 90 | 2.7h |
+| `019d4f69-1923-7801-99a1-0470983f5cc0` | bugfix | 76 | 1.4h |
+| `000a6092-bcad-4b56-9b69-c8035e2d445d` | feature_implementation | 71 | 0.5h |
+| `019d725d-0c41-76b2-9949-65ed5133a051` | bugfix | 64 | 0.7h |
+| `019d404f-465c-7af2-a3eb-b65f23556bca` | feature_implementation | 61 | 1.5h |
+| `019d6db1-ec2e-7342-8820-de647b5e9e78` | bugfix | 55 | 1.8h |
+| `019d6dd5-06b6-74f3-9bc3-1a0ff3110b93` | devops | 54 | 2.8h |
+| `019d2027-30aa-7903-a2bc-27cf3dfa07fd` | documentation | 53 | 1.7h |
+
+### Pool `ops_and_cleanup` — 14 sessions
+
+| Session UUID | Category | Requests | Duration |
+|---|---|---:|---:|
+| `019d72d4-97e5-7571-b9e2-e1c6d6f02f76` | bugfix | 251 | 2.6h |
+| `019d9bed-10d3-7983-9c10-be63f48296c3` | bugfix | 237 | 286.7h |
+| `019d3f6b-7eeb-7620-80f5-edc798c06c75` | bugfix | 176 | 22.8h |
+| `019d72e8-c4f1-7e01-b8c0-f7056fbb2a6f` | bugfix | 147 | 2.2h |
+| `019d25d1-39a5-7273-91a6-0002f6c17659` | bugfix | 137 | 123.1h |
+| `019d4c47-ed8c-7c13-b47a-ab2877ecb7ba` | devops | 131 | 36.1h |
+| `019d73c4-5b75-7f01-82f6-7da8b64b4ac7` | bugfix | 102 | 0.9h |
+| `019d98ce-4166-7ce2-ae8d-f8d6ed676774` | devops | 102 | 1.0h |
+| `019d6e27-1260-7213-96cc-2a1f43b6c4b0` | bugfix | 97 | 3.2h |
+| `019d4f69-1923-7801-99a1-0470983f5cc0` | bugfix | 76 | 1.4h |
+| `019d9771-d06d-7b30-aa3c-4cbfb373f20a` | devops | 75 | 0.3h |
+| `019d725d-0c41-76b2-9949-65ed5133a051` | bugfix | 64 | 0.7h |
+| `019d6db1-ec2e-7342-8820-de647b5e9e78` | bugfix | 55 | 1.8h |
+| `019d6dd5-06b6-74f3-9bc3-1a0ff3110b93` | devops | 54 | 2.8h |
+
+**Reproducing.** `python3 scripts/mine_seed_turns.py` rebuilds `fixtures/seeding/prior_turns.json` from the corpus. It is read-only on the database and never reads the credential field.
+
+---
+
 ## References & further reading (in-repo)
 
 - Taxonomy: `taxonomy/DSM-AE-v0.1-taxonomy.md`
@@ -1297,6 +1605,8 @@ cost alone, and it is a claim we can make today.
 - Harbor task exports: `harbor_tasks/dsm-ae/README.md`
 - Bibliography: `sources/bibliography.md`
 - Bloat investigation: `reports/bloat/bloat50/INVESTIGATION_bloat_beats_baseline.md`
+- Context-bloat effect analysis (§2.3): `docs/surveys/2026-09-10-context-bloat-effects.md`,
+  reproducible from `scripts/bloat_effect_analysis.py`
 
 ---
 
