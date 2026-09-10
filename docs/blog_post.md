@@ -58,8 +58,11 @@ The work consists of four contributions, in order of how well-evidenced they are
 **1. A pipeline from observed behaviour to regression test, with its leaks
 labelled.** Real trajectories → atom/n-gram patterns → deterministic gates →
 mutation search. Some behaviours can be found in trajectory *shape* alone with
-no fixture and no oracle; a subset of those reduce to minimal Harbor tasks
-usable as regression indicators; and that reduction does **not** guarantee a
+no fixture and no oracle. Because agents are ReAct loops, a behaviour is a
+pattern of state transitions — so a gate is the single-turn case, and the
+generalisation is to **seed the prior states** and test the one decision that
+follows. That makes a fixture long-horizon in the state it presents without
+being long-horizon in wall-clock. The reduction does **not** guarantee a
 mutated variant still gets caught, which is where mutation testing and
 MCTS-style search belong. The pipeline also has a ceiling: benchmark failure
 modes are far narrower than real ones, which is why we collect real user
@@ -407,19 +410,72 @@ The strength here is that it needs **no oracle and no fixture** — it works on
 any trajectory you have lying around, including production traffic. That is
 what let us find poll-babysitting at all.
 
-### 2.2 Stage 2→3: reducing a pattern to a gate
+### 2.2 Stage 2→3: seeding state, not just shrinking the task
 
-Once a pattern is named, a *subset* of them can be reduced to a minimal
-reproducible Harbor task with a deterministic gate — a small fixture that
-elicits the behaviour and a check that fires when it occurs. That is what our
-packs are, and it is what makes them usable as **regression indicators**: cheap
-enough to run on every release, deterministic enough that a change in the
-result means something.
+Once a pattern is named, a *subset* can be reduced to a minimal reproducible
+Harbor task with a deterministic gate. But "minimal" is the wrong intuition on
+its own, and it is worth being precise about *why* this works, because it
+determines what a smoke test can and cannot reach.
 
-Not everything survives this reduction. `poll-babysitting` needs a genuinely
-long-running background job to be worth doing, and a fixture small enough to
-run in seconds removes the very condition that produces the behaviour. Some
-behaviours only exist at a scale a smoke test cannot reach.
+**Agents are ReAct loops, so behaviour is a sequence of state transitions.**
+Essentially every modern coding agent is some variant of the same loop: at each
+turn it reasons, acts (a tool call), and observes the result. Reason → Act →
+Observe, then repeat with the observation folded into context. That is also
+what the atom abstraction in §2.1 is capturing — a trajectory is an ordered
+sequence of state transitions, and a behaviour is a *pattern* in that sequence.
+
+Given that framing, a deterministic gate is simply the **single-turn case**:
+put the agent in one state, observe the one action it takes, check it. That is
+cheap and repeatable, and it is genuinely all you need for behaviours that
+manifest in one decision — did it patch a file it never read, did it delete
+something it was told not to.
+
+**The generalisation is to seed the prior states.** For a behaviour that only
+shows up over many turns, you do not have to actually *run* fifty turns. You
+construct states 0…n−1 — prior tool calls, their observations, the
+conversation history, files already in the workspace — and then examine the
+single decision the model makes at state *n*. The evidence is that one
+transition, taken from a realistic multi-turn position.
+
+This makes a fixture **long-horizon in the state it presents without being
+long-horizon in wall-clock**. We already do a limited version of this: the
+recency-bias pack seeds a "regime change" — old documentation describing one
+set of constraints, new documentation superseding it — and then watches
+whether the model re-explores or stays anchored to what it saw most recently.
+The interesting behaviour is in one decision; the setup is what makes that
+decision diagnostic.
+
+**Applied to poll-babysitting.** Earlier we said this behaviour could not
+survive reduction, because a fixture small enough to run in seconds removes
+the long-running job that produces it. Under the state-transition framing that
+is too pessimistic. You do not need a real 51-hour job — you need to seed the
+state *after* several polls and ask what the model does next:
+
+- Given a history of polls that have each returned the same value, does it
+  keep polling, or change strategy?
+- Given a poll result that clearly satisfies the completion condition, does it
+  notice and stop?
+- Absent any instruction about polling frequency, does it choose a sane
+  interval, or does it poll as fast as the loop allows?
+
+That last question is the important one, and it exposes something the raw
+trajectory cannot tell you: **a 51-hour polling loop might be exactly what the
+user asked for.** We do not know from the transcript alone whether the user
+said "watch this until it finishes". What we *can* test is the counterfactual —
+absent instruction, does the model use reasonable defaults, does it track the
+loop condition each turn, and does it recognise when the condition has been
+met and polling can stop?
+
+That is a diagnosis of the *capability*, separated from the user's intent. And
+it is a single-decision test built on a seeded multi-turn state.
+
+**We are being honest that this is a direction, not a finished result.** Our
+current packs are mostly single-turn or shallow, the seeding is hand-authored
+rather than derived from real trajectories, and we have not yet built a
+poll-babysitting fixture along these lines. What the framing buys is a
+principled answer to "which behaviours can a cheap test reach?" — those whose
+diagnostic content is a *decision from a reconstructable state*, which is a
+much larger class than those that need a genuinely long run.
 
 ### 2.3 Stage 3→4: reduction does not guarantee coverage
 
@@ -454,6 +510,15 @@ neither runs under a user's permission configuration.
 We only found those by collecting **real trajectories from real users**
 (§1.5). That is not a supplement to benchmark analysis — for a whole class of
 behaviour it is the only source.
+
+Note the division of labour this implies, and it is not the obvious one. The
+ceiling is on **discovery**, not on testing. §2.2 argues that once you know a
+behaviour exists, you can often reach it with a seeded state rather than a
+long run — so a smoke test *can* probe poll-babysitting even though no
+benchmark would have shown it to you. What benchmarks cannot do is tell you
+the behaviour is there in the first place. Real trajectories find the
+phenomenon; seeded fixtures turn it into something you can run on every
+release.
 
 ### 2.5 What the pipeline is actually for
 
