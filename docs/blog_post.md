@@ -101,6 +101,12 @@ completion tokens [1.40, 1.96] and `scope_creep` runs edited **11 files where
 3 would do**. A correctness-only oracle scores those identically to a clean
 run (§1.4).
 
+These are not artifacts of benchmark conditions. In 75 hand-read sessions of
+real agent use we found an agent that requested permission for the same
+command **185 times** and never told the user it was blocked, and another that
+spent **1337 requests over 51 hours** polling a background job — a task that
+*succeeded*, at roughly 200× the necessary cost (§1.5).
+
 ### The strongest negative result
 
 On SWE-bench-Pro, several behaviours appear to predict failure across 1260
@@ -265,6 +271,94 @@ tokens, so part of the ratio is difficulty rather than behaviour. That is the
 same endogeneity caveat as §2.4. It does not rescue the correctness-only view
 though — whatever the cause, the tokens were spent and the files were touched.
 
+
+### 1.5 What this looks like in real sessions
+
+The numbers above come from benchmark runs. To check they describe something
+real, we hand-read **75 long-horizon sessions** from a corpus of 2192 real
+coding-agent transcripts — median 296 requests, median 5 hours, the longest
+running 474 hours (`docs/surveys/2026-09-09-real-session-examples.md`). These
+are people doing actual work, not benchmark instances.
+
+Three examples, because they are more convincing than any table.
+
+**1. The agent that asked permission 185 times.**
+
+A bugfix session on Tornado's `IOLoop`. The agent diagnoses the bug correctly
+within a few turns, writes a reproduction script, and tries to run it:
+
+```
+assistant: [Bash: python3 test_issue.py]
+user:      [tool_result: This command requires approval]
+
+assistant: [Bash: python3 test_issue.py]
+user:      [tool_result: This command requires approval]
+```
+
+It does that **185 more times**, then the session ends. Of 194 tool calls, 186
+are Bash and 185 are refused. 199 API requests spent re-typing the same six
+words.
+
+Notice where the failure actually is. The model's *reasoning* was fine — it had
+already found the bug. What it lacked was any move that changed the situation:
+it never told the user it was blocked, never asked a question, never gave up.
+The tool returned a refusal carrying no new information, and retry was the only
+option that was not obviously wrong. **That is a scaffold failure wearing a
+model failure's clothes**, and training a smarter model does not fix it.
+
+We found the identical pattern in another session using a different tool — 62
+consecutive `Edit` calls, each answered *"you haven't granted it yet"* — which
+is what tells us it is a property of the harness, not of Bash.
+
+**2. "tmux ui look strange, can you fix it" → 83 edits across 9 files.**
+
+The agent replaced every emoji in the codebase with ASCII equivalents, ran no
+tests, and committed all nine files: 106 insertions, 106 deletions. Nobody ever
+checked whether tmux looked better.
+
+The change might even be correct. But the user asked one question and received
+a 106-line diff across nine files with no evidence it addressed the symptom.
+They now have to read all of it to find out. That is `scope_creep` and
+`never_verified` in one session, and it is the review-burden cost from §1.4
+made concrete.
+
+**3. The 51-hour `sleep 60` loop.**
+
+An agent syncing 500 container images launched the job in the background, then
+watched it:
+
+```
+assistant: Still running, 69 OK so far and 0 failures. Let me check again in a minute.
+[Bash: sleep 60 && grep -c "[OK]" /tmp/sync.log]
+user: [tool_result: 137]
+```
+
+**182 times.** 1337 requests over 51 hours, to learn a number that went from
+137 to 143.
+
+**The task succeeded.** Every correctness-based metric records this as a win.
+The bill was roughly 200× what the work required, and the fix is a scaffold
+feature — a blocking wait-for-condition primitive — not a better model.
+
+We had no name for this one. We are calling it **poll-babysitting**: model
+round trips spent watching a background job. It appeared in 10 of our 75
+sessions, and a corpus-wide scan flags it in 49 of 2192. It was the single
+largest source of wasted requests we found.
+
+**And agents get things right too.** One reconstructed uncommitted work the
+*user* had accidentally destroyed, by reading back its own earlier tool output
+from disk. Another, asked "did you test the example you wrote?" immediately
+after posting a "✅ Verified Working" summary, replied *"No, I haven't actually
+tested it yet!"* and went and ran it. Good behaviour is measurable too, and a
+diagnostic frame should be able to give credit for it.
+
+**One honest note on this sample.** These 75 sessions were hand-read and chosen
+partly *because* they were long, so the counts are not base rates — they show
+that these behaviours occur and what they look like, not how often they occur
+in general. One syndrome we could not study here at all: `test_suppressed`
+fired once in 75 sessions, and the corpus truncates tool payloads, so a skip
+marker buried inside an edit is structurally invisible. That is a limitation,
+not a low rate.
 
 ## 2. The structural split: two kinds of agentic benchmark
 
