@@ -169,7 +169,14 @@ def diagnose(
     )
     # Strip non-LiteLLM keys from client_extra
     litellm_extra = dict(client_extra or {})
-    for k_drop in ("context_bloat", "treatment", "label", "bloat_level"):
+    for k_drop in (
+        "context_bloat",
+        "treatment",
+        "label",
+        "bloat_level",
+        "seed_mode",
+        "fill_mode",
+    ):
         litellm_extra.pop(k_drop, None)
 
     raw_client: ModelClient = make_client(

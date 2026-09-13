@@ -65,6 +65,47 @@ _PACK_INSTANCES: list[IndicatorPack] = [
 
 PACKS: dict[str, IndicatorPack] = {p.id: p for p in _PACK_INSTANCES}
 
+# ---------------------------------------------------------------------------
+# Ceiling-skipped packs
+# ---------------------------------------------------------------------------
+# `scripts/ceiling_audit.py` over the three k=20 gpt-5.6 runs
+# (reports/ceiling/audit.json) found 75 of 94 gates at ceiling: every variant
+# scores exactly 1.00, so the gate returns the same value whether or not the
+# models differ. 18 packs are ceilinged on EVERY gate they own and cannot
+# contribute to separating those models.
+#
+# They are skipped by default to stop spending trials on items that cannot
+# discriminate. This is NOT a claim that the packs are wrong. The ceiling was
+# measured against gpt-5.6 only, and the construct may still be sound at a
+# harder difficulty or against a weaker model -- which is exactly what the
+# re-qualification experiment checks.
+#
+# Re-qualify with:
+#     dsm-ae diagnose -m <weaker-model> --include-skipped
+# and, if any gate leaves ceiling, delete that pack id from this set.
+CEILING_SKIPPED: frozenset[str] = frozenset(
+    {
+        "coord_tax_mini",
+        "eval_gaming_mini",
+        "gate_discipline",
+        "handoff_mini",
+        "injection_mini",
+        "loop_control",
+        "mas_verify_mini",
+        "memory_context",
+        "nfr_omit",
+        "pii_safety",
+        "recency_bias_mini",
+        "role_confusion_mini",
+        "sandbag_mini",
+        "session_overwrite_mini",
+        "slop_indicator",
+        "sycophancy_mini",
+        "tool_integrity",
+        "tool_integrity_tier2",
+    }
+)
+
 
 def get_pack(pack_id: str) -> IndicatorPack:
     if pack_id not in PACKS:
@@ -72,8 +113,15 @@ def get_pack(pack_id: str) -> IndicatorPack:
     return PACKS[pack_id]
 
 
-def list_packs() -> list[str]:
-    return sorted(PACKS)
+def list_packs(include_skipped: bool = False) -> list[str]:
+    """Pack ids to run by default.
+
+    Packs in `CEILING_SKIPPED` are omitted unless `include_skipped` is true.
+    Asking for a skipped pack by id still works -- only the default set shrinks.
+    """
+    if include_skipped:
+        return sorted(PACKS)
+    return sorted(p for p in PACKS if p not in CEILING_SKIPPED)
 
 
 def pack_pattern_index() -> dict[str, list[str]]:

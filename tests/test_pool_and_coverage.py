@@ -35,7 +35,7 @@ def test_diagnose_concurrency_matches_sequential():
 
 
 def test_all_new_packs_registered():
-    packs = set(list_packs())
+    packs = set(list_packs(include_skipped=True))
     for p in [
         "hello_metacog",
         "overeager_mini",
@@ -62,7 +62,7 @@ def test_pattern_index_nonempty():
 def test_full_mock_e2e_all_packs():
     report = diagnose(
         model="mock/well_attuned",
-        packs=list_packs(),
+        packs=list_packs(include_skipped=True),
         k=2,
         concurrency=1,
         keep_traces=False,

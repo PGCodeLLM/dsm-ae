@@ -30,7 +30,7 @@ def _adapter(persona: str, max_turns: int = 16) -> RawToolLoopAdapter:
 
 
 def test_registry_lists_tool_integrity_tier2():
-    assert "tool_integrity_tier2" in set(list_packs())
+    assert "tool_integrity_tier2" in set(list_packs(include_skipped=True))
 
 
 def test_smoke_flags():

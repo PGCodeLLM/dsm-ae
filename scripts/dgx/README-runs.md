@@ -1631,3 +1631,273 @@ find runs -maxdepth 3 -path "*/verifier/reward.txt" \
 ```
 
 Currently clean (verified 2026-09-08 20:55).
+
+## 27. VERIFIED: archives are adapter-compatible -- but the adapter does NOT filter artifacts
+
+`pull_results.sh` lists all 8 job dirs including both `archive-seeded-*`, so
+`--all` retrieves the full corpus. Fetched `archive-seeded-terra` (424 MB) and
+loaded it with the real, unmodified adapter:
+
+```
+load_run(...) -> 31 trials of 31 dirs      (100%, vs 4/10 for the NL2Repo bundle)
+by language   -> python 21, typescript 8, javascript 2
+  instance_ansible__ansible-11c177  reward=0.0  tools=35  python
+  instance_ansible__ansible-29aea9  reward=1.0  tools=26  python
+  ...
+```
+
+Rewards, tool-call extraction and language tagging are all correct. The
+SWE-bench-Pro archives -- which hold the majority of the results -- ingest
+cleanly with no code changes.
+
+### The critical caveat for analysis
+
+**`load_run` returns every trial that has a reward file, including the ones
+`triage_rewards.py` quarantines.** From this bundle it loads:
+
+```
+javascript  reward=0.0  nodebb-a5afad27__Lt65Cc     <- redis segfault, 0 tests ran
+javascript  reward=0.0  nodebb-a5afad27__PBi6jL     <- redis segfault, 0 tests ran
+typescript  reward=0.0  tutanota-5181821__RfRyjk    <- tests PASSED, grader name mismatch
+typescript  reward=0.0  tutanota-5181821__rCo7Tw    <- tests PASSED, grader name mismatch
+```
+
+Those four zeros are **infrastructure artifacts, not model failures**. An
+analysis that calls `load_run` and averages `t.reward` would silently conclude
+that JavaScript scores 0.000 and that TypeScript is far weaker than it is --
+precisely the fabricated language-deficit this whole exercise exists to
+prevent.
+
+The adapter is not wrong to do this; ingesting everything is the right default
+for a loader. But **`triage_rewards.py` is the filter, and it must be applied
+on top of `load_run`** before any per-language number is computed. The mapping
+is by trial name:
+
+```python
+from dsm_ae.harbor.adapter import load_run
+# keep only trials triage_rewards.py verdicts as GENUINE_PASS / GENUINE_FAIL
+scoreable = {name for name, verdict in triage_verdicts.items()
+             if verdict.startswith("GENUINE_")}
+trials = [t for t in load_run(run_dir) if t.trial_name in scoreable]
+```
+
+Cross-check: the adapter loads 8 TypeScript trials from this bundle, while the
+trustworthy table reports `typescript n=12 instances=6` across *all* runs --
+the difference is exactly the quarantined ones.
+
+## 28. Remaining work and what the finished run will actually contain
+
+Python attempts kept rising (63 -> 69) while distinct instances stayed pinned at
+18 and TypeScript did not move at all, which looked like the jobs re-running
+work instead of advancing. They are advancing -- the flat instance count has a
+different cause.
+
+Authoritative counts (matching `result.json`'s `task_name` against the dataset
+dirs; note `task_name` carries a `scaleai/swe-bench-pro__` prefix and the
+casing differs, so both must be normalised):
+
+```
+nogo tasks attempted   22 of 43
+remaining              21
+
+remaining by language   python 13   typescript 5   javascript 3
+full nogo set           python 26   typescript 13  javascript 4
+```
+
+So the run is roughly half-way through the Go-free set, and **most of the
+remaining work is Python** (13 of 21). The flat instance count is simply
+repeated attempts on already-seen instances draining before new ones start.
+
+### Projected final coverage
+
+If the remaining 21 tasks complete and their artifact rate matches what we have
+seen:
+
+- **python** ~18 -> up to ~31 instances: the only language that will be
+  well-sampled.
+- **typescript** 6 -> up to ~11 instances: usable, still small.
+- **javascript** 0 usable, and the 3 remaining nodebb tasks will also yield
+  nothing -- every nodebb instance dies on the redis segfault (section 20).
+
+That last point is worth stating plainly: **finishing the run will not produce
+any JavaScript data.** JS coverage on this hardware is structurally zero, not
+merely under-sampled, so no amount of additional runtime changes it.
+
+### Caution on prefix-based counting
+An earlier count in this section used truncated trial-dir prefixes and reported
+"11 of 43 attempted", which was wrong -- Harbor truncates trial dir names, so
+distinct tasks collapse onto the same prefix (the same trap as section 24).
+Always resolve task identity through `result.json`'s `task_name`.
+
+## 29. The flat instance count is normal, not a stall (checked twice)
+
+`instances=18` held steady for ~10 monitor cycles while Python attempts climbed
+63 -> 74, which looked like the jobs retrying instead of advancing. Checked
+directly; **they are healthy**:
+
+```
+harbor procs 6      sessions 2      env containers 4
+config -> datasets/swebenchpro-nogo (43 tasks)
+rewards in last 60m  3
+rewards in last 3h  11      (~3.7/h across both jobs)
+```
+
+Every task in the live jobs appears exactly **2x**, which is the two models --
+not a retry loop. Distinct tasks did stay pinned at 22 of 43 across the check,
+but that is a sampling artifact of *when* the counts were taken: trials that
+start together finish together, so distinct-task count advances in steps while
+the attempt count rises smoothly between them.
+
+The earlier framing in section 28 ("repeated attempts drain before new ones
+start") was the right intuition but stated too loosely -- it implied a backlog
+being worked off. The accurate statement is that **attempts and distinct tasks
+advance on different clocks**: attempts increment per completed trial, distinct
+tasks only when a genuinely new task begins, and with concurrency 2 that happens
+in bursts of 2.
+
+Practical note for anyone watching these runs: **do not infer a stall from a
+flat `instances=` count.** The signals that actually indicate a stall are zero
+rewards over a multi-hour window, `harbor_procs=0`, or containers at ~0% CPU
+with frozen `opencode.txt` (section 10). All three were checked here and all
+three are healthy.
+
+
+---
+
+## 30. Model-endpoint failure modes seen while running the rev2 pack arms (2026-09-12)
+
+Three distinct infrastructure failures, none of them scientific. Recorded so they
+are recognised rather than re-diagnosed.
+
+### 30.1 Stale container image — `KeyError: Unknown pack '<name>_rev2'`
+
+The queue worker runs inside the `dsm-ae` container. `docker-compose.yml` mounts
+`data/`, `reports/`, `logs/` and `models.yaml`, but **not `src/`** — application
+code is baked into the image. Any new pack, registry change or CLI flag is
+invisible to the running worker until the image is rebuilt.
+
+Symptom: every job fails within seconds, with the container's registry listing
+only the packs that existed at image build time.
+
+Check, then fix:
+
+```bash
+docker exec dsm-ae python3 -c "from dsm_ae.packs.registry import list_packs; print(len(list_packs(include_skipped=True)))"
+./docker-build.sh --down && ./docker-build.sh     # --down first: the script refuses while :8765 is held
+```
+
+Note the rebuild bakes in the current working tree, uncommitted changes included.
+
+### 30.2 Rate limiting — `RateLimitError` / `BadGatewayError`
+
+`models.yaml` pins `rpm: 6` for the gpt-5.6 family. Running pack arms at
+concurrency 16 produced `litellm.RateLimitError: Rate limit exceeded` and
+`BadGatewayError`. **Concurrency 8 runs clean.** Do not raise it without also
+raising rpm.
+
+### 30.2b The Qwen failures were a RENAMED MODEL, not the TokenizerManager bug
+
+**Correction to §30.3 below.** The alternating OK/timeout behaviour on the Qwen
+endpoint was diagnosed as the SGLang TokenizerManager bug. It was not. On
+2026-09-12 the gateway was found to advertise exactly one id:
+
+```
+GET /v1/models  ->  ['vllm/Qwen3.8-27B-NVFP4']
+```
+
+The id in `models.yaml` was the older `Qwen3.8-27B-NVFP4-BF16-LMHead`. Against
+the current gateway that id returns:
+
+| id sent | result |
+|---|---|
+| `Qwen3.8-27B-NVFP4` | **OK, 8/8 probes, 1.9-4.3s** |
+| `vllm/Qwen3.8-27B-NVFP4` | OK |
+| `Qwen3.8-27B-NVFP4-BF16-LMHead` | HTTP 400 "could not auto resolve a provider" |
+| `vllm/Qwen3.8-27B-NVFP4-BF16-LMHead` | HTTP 403 `model_blocked` |
+
+After switching to the current id the endpoint is stable — no alternating
+timeouts at all. `models.yaml` now carries `Qwen3.8-27B-NVFP4` as the live
+entry, keeps the old name as a deprecated alias pointing at the same backend so
+historical run records stay resolvable, and drops `timeout` from 1800s to 300s
+so a hung call fails its trial instead of occupying the single worker slot for
+half an hour.
+
+**Lesson:** when an endpoint alternates between fast success and long hangs,
+check `GET /v1/models` against the id being sent *before* concluding the backend
+is wedged. A renamed model can produce backend-failure-shaped symptoms.
+
+Note also: Qwen is served by the `gx10-4-kng` gateway only. The
+`arcyleung-ubuntu` gateway returns `unknown provider for model
+Qwen3.8-27B-NVFP4` in ~0.1s for every Qwen id, on both its Tailscale and LAN
+addresses. It is not an alternate route.
+
+### 30.3 SGLang backends stop inferencing — TokenizerManager state loss
+
+The Bifrost-fronted SGLang backends on the DGX/GB10 host eventually log:
+
+```
+Received output for rid but the state was deleted in TokenizerManager
+```
+
+and stop serving inference. This is a real failure mode reported by the
+operator, but **§30.2b is the more common cause of the same symptoms** — rule
+out a renamed model id first. The signature from a client is distinctive,
+because the gateway stays healthy while only generation is dead:
+
+| Probe | Result when this bug is active |
+|---|---|
+| `GET /v1/models` | OK, ~0.4s |
+| bad model name | HTTP 400 in ~0.4s (Bifrost routing is alive) |
+| `POST /v1/chat/completions` | **alternates**: ~1.7s success, then timeout past 120s |
+| occasional | `502 dial tcp 172.17.0.1:8000: connect: connection refused` |
+
+A restart only partially clears it — after one restart the success rate was 2/8.
+Retrying does not help, since the backend is not dropping the request, it is
+never completing it.
+
+Consequences for the queue: `models.yaml` sets `timeout: 1800` for the Qwen
+endpoint, so a single unlucky call stalls the single worker slot for 30 minutes,
+and the job sits at `0/30 starting` while ignoring cancellation. Clear it with
+`JobStore.mark_failed(job_id, reason)` and restart the container to free the slot;
+queued jobs survive in SQLite.
+
+**Operational rule:** probe an endpoint before enqueueing against it. A quick
+alternating-timeout check costs seconds and saves hours of stalled queue:
+
+```bash
+for i in 1 2 3 4; do
+  curl -sS -o /dev/null -w "%{http_code} %{time_total}s\n" -m 20 \
+    -H "Content-Type: application/json" -H "Authorization: Bearer $KEY" \
+    -d '{"model":"<model>","messages":[{"role":"user","content":"hi"}],"max_tokens":8}' \
+    "$BASE/v1/chat/completions"
+done
+```
+
+### 30.4 Transient per-model gateway flapping
+
+Distinct from 30.3 and self-healing. On `arcyleung-ubuntu`, `gpt-5.6-terra` timed
+out 3/3 on `/v1/chat/completions` while `sol` and `luna` answered in ~1.3s, then
+recovered to 5/5 minutes later. It was reachable on `/v1/responses` while still
+hanging on `/v1/chat/completions`, so check both paths before concluding a model
+is down.
+
+This is **not** DNS: the failure reproduced identically on the Tailscale name and
+on the LAN address `http://192.168.2.15:8317/v1`. That LAN address is a valid
+faster route to the gpt-5.6 models (`/v1/models` in 0.0s vs 0.4s), but it does
+**not** serve Qwen — Qwen is on a separate host and is not in that gateway's
+28-model list.
+
+### 30.5 gpt-5.6-terra upstream outage (2026-09-12)
+
+Distinct from the transient flap in §30.4, which self-healed. As of 2026-09-12
+`gpt-5.6-terra` times out on **every** route tried:
+
+| route | terra | sol (control) |
+|---|---|---|
+| Tailscale `/v1/chat/completions` | Timeout 15s | — |
+| LAN `/v1/chat/completions` | Timeout 15s | **OK 0.9s** |
+| LAN `/v1/responses` | Timeout 15s | — |
+
+Since `sol` answers in under a second on the same gateway and the same call
+shape, this is a per-model upstream outage rather than a gateway or network
+problem. terra is excluded from the rev2 arms until it answers a probe.

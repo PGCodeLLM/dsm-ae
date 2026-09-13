@@ -15,7 +15,11 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-llm = ["litellm>=1.40"]
+# litellm imports tenacity lazily for its retry-on-5xx path but does not declare
+# it. Without it, `num_retries` silently does nothing: a single transient 502
+# from a model gateway aborts the whole run with
+# "tenacity import failed please run 'pip install tenacity'".
+llm = ["litellm>=1.40", "tenacity>=8.0"]
 web = [
   "fastapi>=0.110",
   "uvicorn[standard]>=0.27",

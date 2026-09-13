@@ -149,9 +149,20 @@ def classify(trial_dir: Path) -> dict:
             text = stdout.read_text(errors="ignore")[-40000:] if stdout.exists() else ""
         except Exception:
             text = ""
-        if any(k in text for k in
-               ("ERROR collecting", "ImportError", "ModuleNotFoundError",
-                "errors during collection")):
+        # A qemu-level signal means a native binary the verifier depends on
+        # died under emulation (Go runtime, redis-server, ...). Language is
+        # irrelevant -- nothing was measured.
+        stderr_f = trial_dir / "verifier" / "run-script-stderr.txt"
+        err = ""
+        try:
+            err = stderr_f.read_text(errors="ignore")[-20000:] if stderr_f.exists() else ""
+        except Exception:
+            err = ""
+        if "qemu: uncaught target signal" in err:
+            verdict = "ARTIFACT_QEMU_SIGNAL"
+        elif any(k in text for k in
+                 ("ERROR collecting", "ImportError", "ModuleNotFoundError",
+                  "errors during collection")):
             verdict = "GENUINE_FAIL"
         else:
             verdict = "ARTIFACT_NO_TESTS_RAN"
@@ -177,7 +188,14 @@ def main() -> None:
     for job in sorted(p for p in root.iterdir() if p.is_dir()):
         for trial in sorted(p for p in job.iterdir() if p.is_dir()):
             info = classify(trial)
-            info.update(job=job.name, trial=trial.name,
+            inst = None
+            rj = trial / "result.json"
+            if rj.exists():
+                try:
+                    inst = json.loads(rj.read_text()).get("task_name")
+                except Exception:
+                    inst = None
+            info.update(job=job.name, trial=trial.name, instance=inst,
                         language=language_of(trial.name))
             rows.append(info)
 
@@ -201,13 +219,24 @@ def main() -> None:
 
     print("\n== TRUSTWORTHY scoring rate, by language ==")
     print("   (artifacts excluded -- they measured nothing)")
-    by_lang: dict[str, list[float]] = {}
+    print("   n = model-ATTEMPTS; instances = distinct problems. Every instance")
+    print("   is attempted by both models, so n roughly doubles the sample size.")
+    by_lang: dict[str, list[tuple[float, str]]] = {}
     for r in rows:
         if r["verdict"] in ("GENUINE_PASS", "GENUINE_FAIL"):
-            by_lang.setdefault(r["language"], []).append(r["reward"])
+            # Instance identity must come from result.json's task_name:
+            # Harbor TRUNCATES the trial dir name, so several distinct
+            # instances collapse to the same prefix (e.g. every openlibrary
+            # task becomes "instance_internetarchive__openli"), which
+            # undercounts distinct problems.
+            inst = r.get("instance") or r["trial"].rsplit("__", 1)[0]
+            by_lang.setdefault(r["language"], []).append((r["reward"], inst))
     for lang in sorted(by_lang):
         v = by_lang[lang]
-        print(f"  {lang:<12} n={len(v):3d}  mean={sum(v)/len(v):.3f}")
+        rewards = [x for x, _ in v]
+        n_inst = len({i for _, i in v})
+        print(f"  {lang:<12} n={len(v):3d}  instances={n_inst:3d}  "
+              f"mean={sum(rewards)/len(rewards):.3f}")
 
     quarantined = sum(1 for r in rows if r["verdict"].startswith(("ARTIFACT", "UNKNOWN")))
     if quarantined:

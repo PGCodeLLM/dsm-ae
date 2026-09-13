@@ -56,11 +56,24 @@ def _print_report(report, out: Optional[Path], json_out: Optional[Path]) -> None
 
 
 @app.command("list-packs")
-def list_packs_cmd() -> None:
-    """List indicator protocol packs."""
-    for pid in list_packs():
+def list_packs_cmd(
+    include_skipped: bool = typer.Option(
+        False, "--include-skipped", help="Also list ceiling-skipped packs"
+    ),
+) -> None:
+    """List indicator protocol packs (ceiling-skipped ones are hidden by default)."""
+    from dsm_ae.packs.registry import CEILING_SKIPPED
+
+    for pid in list_packs(include_skipped=include_skipped):
         p = PACKS[pid]
-        console.print(f"- [bold]{pid}[/bold]: {p.name} ({', '.join(p.patterns)})")
+        tag = " [yellow](ceiling-skipped)[/yellow]" if pid in CEILING_SKIPPED else ""
+        console.print(f"- [bold]{pid}[/bold]: {p.name} ({', '.join(p.patterns)}){tag}")
+    if not include_skipped and CEILING_SKIPPED:
+        console.print(
+            f"\n[dim]{len(CEILING_SKIPPED)} pack(s) skipped: every gate sat at "
+            f"ceiling across the three k=20 gpt-5.6 runs. "
+            f"Use --include-skipped to list or re-qualify them.[/dim]"
+        )
 
 
 @app.command("coverage")
@@ -85,9 +98,14 @@ def coverage_cmd(
         "## Packs",
         "",
     ]
-    for pid in list_packs():
+    # Coverage counts every registered pack: a ceiling-skipped pack still wires
+    # its taxonomy codes, so hiding it here would understate coverage.
+    from dsm_ae.packs.registry import CEILING_SKIPPED
+
+    for pid in list_packs(include_skipped=True):
         p = PACKS[pid]
-        lines.append(f"- `{pid}` → {', '.join(f'`{c}`' for c in p.patterns)}")
+        tag = " _(ceiling-skipped)_" if pid in CEILING_SKIPPED else ""
+        lines.append(f"- `{pid}` → {', '.join(f'`{c}`' for c in p.patterns)}{tag}")
     lines.append("")
     lines.append("## Unwired codes (first 40)")
     lines.append("")
@@ -238,9 +256,17 @@ app.add_typer(queue_app, name="queue")
 _DEFAULT_DB = Path("data/queue.db")
 
 
-def _parse_packs(packs: Optional[str], full_suite: bool) -> Optional[list[str]]:
+def _parse_packs(
+    packs: Optional[str], full_suite: bool, include_skipped: bool = False
+) -> Optional[list[str]]:
+    """Resolve a pack selection.
+
+    ``--full-suite`` means every pack that still discriminates; ceiling-skipped
+    packs are excluded unless ``include_skipped`` is set. An explicit
+    ``--packs`` list is always honoured verbatim, skipped or not.
+    """
     if full_suite:
-        return list_packs()
+        return list_packs(include_skipped=include_skipped)
     if packs:
         return [x.strip() for x in packs.split(",") if x.strip()]
     return None
@@ -264,6 +290,11 @@ def queue_enqueue(
     concurrency: int = typer.Option(1, "--concurrency", "-j"),
     rpm: Optional[float] = typer.Option(None, "--rpm"),
     full_suite: bool = typer.Option(False, "--full-suite", help="Enqueue all registered packs"),
+    include_skipped: bool = typer.Option(
+        False,
+        "--include-skipped",
+        help="With --full-suite, also enqueue ceiling-skipped packs (re-qualification runs)",
+    ),
     priority: int = typer.Option(0, "--priority"),
     label: Optional[str] = typer.Option(None, "--label"),
     runner: Optional[str] = typer.Option(
@@ -282,7 +313,7 @@ def queue_enqueue(
     from dsm_ae.queue.progress import progress_path_for, write_progress
     from dsm_ae.queue.store import JobStore
 
-    pack_list = _parse_packs(packs, full_suite)
+    pack_list = _parse_packs(packs, full_suite, include_skipped)
     extra = None
     if runner:
         extra = {"runner": runner.strip().lower()}
@@ -333,6 +364,11 @@ def queue_enqueue_batch(
     concurrency: int = typer.Option(1, "--concurrency", "-j"),
     rpm: Optional[float] = typer.Option(None, "--rpm"),
     full_suite: bool = typer.Option(False, "--full-suite"),
+    include_skipped: bool = typer.Option(
+        False,
+        "--include-skipped",
+        help="With --full-suite, also enqueue ceiling-skipped packs (re-qualification runs)",
+    ),
     priority: int = typer.Option(0, "--priority"),
     label: Optional[str] = typer.Option(None, "--label"),
     db: Path = typer.Option(_DEFAULT_DB, "--db"),
@@ -344,7 +380,7 @@ def queue_enqueue_batch(
     if not model_list:
         console.print("[red]No models provided[/red]")
         raise typer.Exit(1)
-    pack_list = _parse_packs(packs, full_suite)
+    pack_list = _parse_packs(packs, full_suite, include_skipped)
     store = JobStore(db)
     for model in model_list:
         jid = store.enqueue(

@@ -100,8 +100,8 @@ def test_coord_tax():
 
 
 def test_all_packs_mock():
-    report = diagnose(model="mock/well_attuned", packs=list_packs(), k=1, concurrency=2, keep_traces=False)
-    assert len(list_packs()) >= 19
+    report = diagnose(model="mock/well_attuned", packs=list_packs(include_skipped=True), k=1, concurrency=2, keep_traces=False)
+    assert len(list_packs(include_skipped=True)) >= 19
     assert report.gates
     # all MA chapter codes should be wired
     from dsm_ae.packs.registry import pack_pattern_index

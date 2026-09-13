@@ -99,6 +99,10 @@ def run_one(
         if context_bloat is None and extra.get("bloat_level") is not None:
             context_bloat = float(extra.pop("bloat_level"))
         treatment = extra.pop("treatment", None)
+        # E3 arm selector. Must not leak into LiteLLM kwargs.
+        extra.pop("seed_mode", None)
+        extra.pop("fill_mode", None)
+        extra.pop("label", None)
         # Harbor path: outer k-trial pack runner with queue progress indicator.
         runner = str(extra.pop("runner", "") or "").strip().lower()
         if runner == "harbor" or extra.pop("harbor", False) is True:

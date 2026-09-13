@@ -29,7 +29,7 @@ def _adapter(persona: str) -> RawToolLoopAdapter:
 
 
 def test_registry_lists_tier_packs():
-    packs = set(list_packs())
+    packs = set(list_packs(include_skipped=True))
     assert "slop_indicator" in packs
     assert "erosion_tier2" in packs
     assert "erosion_tier3" in packs

@@ -86,7 +86,7 @@ metrics that say when a reduced test suite is still adequate compared against a 
 
 **4. A 158-pattern taxonomy across 10 chapters**, literature-anchored, with
 ~24 deterministic indicator packs. The other three contributions rest upon this
-framework. (§5)
+framework. (§6–§7)
 
 ---
 
@@ -974,8 +974,9 @@ This is exactly the problem mutation testing was invented for, and the
 argument for MCTS-style search over the fixture space: **perturb the task,
 and check the gate still fires.** A suite that catches no injected variant
 is inadequate no matter how well-motivated the construct behind it is
-(§4.1). We have not run this yet, and it is the cheapest experiment that
-would change our verdict (§5.4).
+(§4.1). Scaffold-level mutation is done (Appendix B, E2). Model-level
+mutation — a known-deficient model, pack for X fires — is still
+outstanding.
 
 ### 2.5 The ceiling: benchmark failure modes are narrower than real ones
 
@@ -1342,87 +1343,94 @@ legitimate fix.
 
 ## 4. What makes a good smoke test
 
-The claim "a cheap battery can stand in for an expensive benchmark" is an
-old one, and software testing research has spent four decades answering
-the question behind it: when is a reduced test suite still adequate? We
+Software testing research has spent four decades on the question a cheap
+agent battery has to answer: when is a reduced suite still adequate? We
 surveyed 65 verified sources
-(`docs/surveys/2026-09-08-smoke-test-criteria-survey.md`) and borrowed
-four established metrics, which is more defensible than inventing our own
-criteria and then judging ourselves against them.
+(`docs/surveys/2026-09-08-smoke-test-criteria-survey.md`) and took the
+method from that literature rather than inventing our own criteria. Each
+criterion below names what the source established, how we use it, and
+which part of this write-up already applies it. Parts we have not yet
+verified sit in [Appendix B](#appendix-b--planned-experiments-and-retired-claims).
 
-### 4.1 Four borrowed criteria
+### 4.1 How the literature supports the method
 
-**Fault-detection rate per unit cost (APFD / APFD_c).** Rothermel et al.
-(TSE 2001); Elbaum et al. (ICSE 2001) added cost- and severity-weighting.
-The analogue here: at what fraction of total battery cost do you
-correctly identify the models that will do badly on the real benchmark?
+**A smoke test is a cheap gate in front of an expensive process.** Memon
+& Xie (ICSM 2004; TSE 2005) evaluate smoke tests by the fraction of
+faults they catch *relative to the full suite, per unit of cost*. In
+industrial use that is a build-verification test: is this build worth
+the expensive suite? It is not a diagnosis and it is not a substitute
+for the full run. That is the claim we adopt in §4.2. The cost argument
+is already measured on our hardware: a SWE-bench-Pro instance is on the
+order of 1–2 hours, a model-sized slice about a day; a pack battery is
+minutes.
 
-**Item discrimination and item information (IRT).** Lord; Embretson &
-Reise; imported into NLP evaluation by Lalor et al. (EMNLP 2016) and
-Rodriguez et al. (ACL 2021). The sharp version: *an item everyone passes
-has discrimination ≈ 0 and carries zero information regardless of how
-well-motivated the construct behind it is.* A gate every model passes
-should therefore be treated as **dead weight in the battery**, however
-sound the reasoning behind it, and the remedy is to make the test harder
-rather than to defend the construct.
+**Order the battery by defect-finding power per unit cost (APFD /
+APFD_c).** Rothermel, Untch, Chu & Harrold (TSE 2001) ask: if you run
+only the first *k*% of an ordered suite, what fraction of known faults
+have you already caught? Elbaum, Malishevsky & Rothermel (ICSE 2001)
+weight that by execution cost and fault severity; Do, Mirarab,
+Tahvildari & Rothermel (TSE 2010) put it under an explicit time budget —
+the regime a smoke test lives in. In our setting the analogue of a
+"fault" is a model that will do badly on the real task. We use this as
+*design*: spend trials on gates that can still move, skip gates that
+cannot (§5.1). We do **not** report an APFD number. The statistic is
+undefined on the current NL2Repo fault population (Appendix B).
 
-**Mutation adequacy.** DeMillo, Lipton & Sayward (1978); the
-coupling-effect validity argument from Offutt (TOSEM 1992). Perturb the
-system in known ways and score the suite by what fraction it detects. A
-suite that catches no injected defect is inadequate *no matter what it
-covers*.
+**Treat an item everyone passes as carrying zero information (IRT).**
+Lord, Embretson & Reise, and van der Linden & Glas define item
+discrimination and item information for exactly this data shape:
+subjects × items × binary outcome. An item everyone passes, or everyone
+fails, has discrimination ≈ 0 regardless of how well-motivated the
+construct is. Lalor, Wu & Yu (EMNLP 2016) and Rodriguez et al. (ACL
+2021) already imported that into NLP evaluation. We apply it directly:
+a gate at 1.00 for every model in a comparison is dead weight, so those
+packs are skipped by default (§5.1); seeding prior state is how we make
+an existing question hard enough to answer differently (§5.2); structural
+versus count-thresholded gates are different jobs, not two qualities of
+the same item (§5.3).
 
-**Failure recall under selection.** Herzig et al. (ICSE 2015); Machalica
-et al. (ICSE-SEIP 2019); Memon et al. (ICSE-SEIP 2017). What fraction of
-the full suite's failures does the reduced suite still catch, and at what
-fraction of the cost?
+**Score the suite by the defects it actually catches (mutation
+adequacy).** DeMillo, Lipton & Sayward (1978) and the coupling-effect
+argument in Offutt (TOSEM 1992): perturb the system in known ways and
+count what the suite detects. A suite that misses every injected defect
+is inadequate no matter what it covers. That is why the pipeline in §2
+ends at mutation search, and why a gate written against one observation
+is not assumed to catch a variant of the same behaviour (§2.4).
+Scaffold-level mutation is done (Appendix B, E2): 82 non-task gates
+PASS when the opportunity to fail is removed. Model-level mutation —
+take a model known to be deficient in X and confirm the pack for X
+fires — is still outstanding (Appendix B).
 
-### 4.2 What the literature says *against* us
+**Evaluate a reduced suite by failure recall, not by coverage.** Herzig,
+Greiler, Czerwonka & Murphy (ICSE 2015), Machalica, Samylkin, Porth &
+Chandra (ICSE-SEIP 2019), Memon et al. (ICSE-SEIP 2017), Elbaum,
+Rothermel & Penix (FSE 2014), and Gligoric, Eloussi & Marinov (ISSTA
+2015) all ask the same practitioner question: of the failures the full
+suite would have caught, what fraction does the reduced one still catch,
+and at what fraction of the cost? Inozemtseva & Holmes (ICSE 2014) is
+why we do not substitute statement coverage for that question. Our first
+external-anchor attempt is E5: BFCL irrelevance versus `overeager_mini`.
+The two instruments do not rank gpt-5.6-sol and Qwen3.8-27B the same
+way (§2.3). Failure recall against a real-task suite remains unverified
+(Appendix B).
 
-Three findings cut against the strong version of the smoke-test claim,
-and a reviewer will raise them.
+Three further results from the same survey constrain *how far* a
+reduction can be pushed. They are design bounds, not arguments against
+the method, and the work they still require is in Appendix B: coverage
+is not effectiveness, so selecting one gate per syndrome at random
+already matches a careful selector; aggressive 5- or 10-gate
+minimization overfits; published LLM subsetting (tinyBenchmarks, Anchor
+Points, Sort & Search) fits IRT parameters on tens to tens of thousands
+of already-evaluated models, which we do not have.
 
-**Coverage is not the same as effectiveness.** Inozemtseva & Holmes (ICSE
-2014) showed that coverage correlates poorly with how effective a suite
-actually is. That reproduces on our battery. Picking one gate per
-syndrome to preserve coverage (HGS-style) reproduces the full-suite model
-ordering at ρ=0.963, and picking one gate per syndrome *completely at
-random* still gets ρ=0.940. **Nearly all the benefit comes from touching
-every syndrome at least once, and almost none from which gate you pick
-within each one** — so a careful selection procedure is buying much less
-than it appears to.
+### 4.2 What we can claim today
 
-**Aggressive minimization loses fault detection.** The classic Rothermel
-negative result reproduces here too. Greedy selection scored on the same
-data it was fitted to reaches a perfect ρ=1.000 at just k=5 gates, but
-4.1% of *randomly chosen* 5-gate subsets also clear ρ≥0.95, so that
-perfect score mostly reflects overfitting. Testing it honestly — dropping
-the three saturated models and holding out each model in turn — the
-correlation falls to **+0.613 at k=5 and +0.288 at k=10**, with
-confidence intervals spanning zero, and only recovers near k≈15–20. So
-the practical answer to "how far can the battery be pared down" is
-**about 15 to 20 gates, and a 5- or 10-gate suite is too small.**
-
-**The subsetting precondition we do not meet.** tinyBenchmarks (100 of
-14K MMLU items), Anchor Points, Sort & Search all *prove* large
-reductions work — and every one fits item parameters on a large pool of
-**already-evaluated models**: 87, ~100, 31,000 respectively. We have 10
-models and no verified pack↔task identity join, so those reduction
-results do not transfer here yet.
-
-The battery's own item-difficulty problem — most gates sit at ceiling, and
-that is a *design* question rather than a suite-reduction question — is
-taken up in §5.
-
-### 4.3 Triage, not substitution
-
-The industrial literature is consistent on this point: smoke tests work as
-**triage**, deciding what deserves a closer look, rather than as a
-replacement for the expensive multi-suite benchmark run. That is the
-claim we adopt, and it is the one we can actually support today, because
-it rests only on cost. Showing that a cheap battery is worth running
-before an expensive benchmark is much more practical than showing it
-predicts the benchmark's score.
+Smoke tests work as **triage**: they decide what deserves a closer look.
+That is the industrial claim (Memon & Xie), it rests only on cost, and
+it is the claim this battery can support today. Showing that a cheap
+run is worth doing *before* an expensive multi-suite benchmark is a
+different, and much more practical, statement than showing the cheap
+run predicts the benchmark's score.
 
 ---
 
@@ -1446,8 +1454,8 @@ each gate is flat:
 | **Live** — the gate resolves some difference | **18** | 19.1% |
 
 This reproduces the 81% flat figure in the ten-model vs three-variant
-comparison, and changes what it
-means. **99% of the flat gates are flat because every model passes
+comparison, and changes what it means. **99% of the flat gates are
+flat because every model passes
 them**, so they were never asked a question hard enough to answer. A
 ceilinged gate returns the same value whether or not the models differ,
 which means the 81% statistic measures *item difficulty* rather than the
@@ -1670,11 +1678,13 @@ measuring what it claims.
 
 ### 5.4 The cheapest experiment that would move the verdict
 
-The mutation-adequacy check (§4.1) is the missing experiment and needs
-**no benchmark runs**: take a model or scaffold known to be deficient in
-capability X, and confirm the pack for X fires. We have never done this
-at the model level. Given the design rules above, it is the question
-that matters most — do these packs detect anything at all?
+Scaffold-level mutation is done (Appendix B, E2): stripping delete, read,
+or shell leaves 82 non-task gates PASSing, including the rev2
+gate-discipline gates. What remains, and still needs **no benchmark
+runs**, is the model-level check the literature asks for (§4.1): take a
+model known to be deficient in capability X and confirm the pack for X
+fires. That is the question that would change the verdict on whether
+these packs detect anything at the model, not only at the fixture.
 
 ---
 
@@ -1827,13 +1837,13 @@ codes.
    measurement overlay on constructs that industry taxonomies already
    treat as systematic — it is not field epidemiology.
 3. **Polythetic OR is maximally sensitive.** A single weak gate is
-   enough to mark a syndrome PRESENT, since the battery has no DSM-style
-   "≥2 of 5 criteria" threshold. The OR-vs-2-of-N sensitivity table
-   could be computed from existing report JSON without a single new
-   model call, and we have not run it.
-4. **Some elicitations are too weak to fail** (documented 2026-07-11).
-   Those gates pass for every model, so a PASS from them is evidence
-   about the fixture rather than evidence a disorder is absent.
+   enough to mark a syndrome PRESENT. §3.1 already computed the
+   OR-vs-2-of-N table on existing reports: every stricter rule
+   discriminates fewer syndromes (18/22 → 5/22). Combining gates cannot
+   create information they never captured.
+4. **Some elicitations are too weak to fail** (§5.1). Those gates pass
+   for every model, so a PASS from them is evidence about the fixture
+   rather than evidence a disorder is absent.
 5. **Coverage is partial.** Roughly 61–74 of 158 codes are wired.
    Shutdown resistance, CUA visual attacks, MCP poisoning,
    slopsquatting and goal misgeneralization all remain unwired, and
@@ -1896,21 +1906,20 @@ rate erases them (§3.2).
 **What is not.** The pack battery cannot yet tell similar models apart:
 81% of gates return identical values across three gpt-5.6 variants at
 our highest-powered setting (§5.1). On SWE-bench-Pro, no instrument
-survives correction for both clustering and scaffold (§3.4). The claim
-that packs predict benchmark scores remains blocked at 10 evaluated
-models with no verified identity join, well short of what the subsetting
-literature requires (§4.2).
+survives correction for both clustering and scaffold (§3.4). Predicting
+a benchmark score from the packs is a substitution claim the literature
+does not ask us to make (§4.2), and the preconditions for published
+subsetting results are not met here (Appendix B).
 
-**Next steps**, in cost order. The mutation-adequacy check (§5.4) comes
-first because it needs no benchmark runs and directly answers whether
-these packs detect anything at all. Then fix elicitation for the gates
-sitting at ceiling, and rebuild count-thresholded gates as structural or
-harness-normalized ones (§5.3).
+**Next steps**, in cost order, are in Appendix B. The remaining
+mutation check is model-level, not scaffold-level (§5.4). Then
+re-qualify the skipped packs (E1b), close the vacuous-pass holes E2
+found, and finish the Qwen E3 arms.
 
 **The framing we would defend.** Smoke tests earn their place as
 **triage**, identifying what deserves an expensive run. The industrial
-literature supports that claim, it rests on cost alone, and it is one we
-can make today.
+literature supports that claim (§4.1–§4.2), it rests on cost alone, and
+it is one we can make today.
 
 ---
 
@@ -1994,7 +2003,7 @@ with the user pointing at a knowledge-transfer package prepared by a
 
 ### Pool `ops_and_cleanup` — 14 sessions
 
-| Session UUID | Category | Requests | Duration |
+| Session ID | Category | Requests | Duration |
 |---|---|---:|---:|
 | `019d72d4-97e5-7571-b9e2-e1c6d6f02f76` | bugfix | 251 | 2.6h |
 | `019d9bed-10d3-7983-9c10-be63f48296c3` | bugfix | 237 | 286.7h |
@@ -2019,10 +2028,35 @@ the database and never reads the credential field.
 
 ## Appendix B — planned experiments and retired claims
 
-These are designs and negative conclusions, not results. The completed
-ceiling audit is in §5.1. Status below is as of 2026-09-13.
+These are designs, retired claims, and the reductions the §4.1 literature
+licenses but we have not verified. The completed ceiling audit is in
+§5.1. Status below is as of 2026-09-13.
 
-### Claims the ceiling audit retires
+### Next steps — licensed by the literature, not yet verified
+
+**Coverage is not a substitute for failure recall (Inozemtseva & Holmes,
+ICSE 2014).** That finding already reproduces on our battery: picking
+one gate per syndrome to preserve coverage (HGS-style) matches the
+full-suite model ordering at ρ=0.963, and picking one gate per syndrome
+at random still gets ρ=0.940. Nearly all the benefit is "touch every
+syndrome once," not which gate you pick. A better selector is not the
+next experiment; harder items are (§5).
+
+**Aggressive minimization overfits (Rothermel).** Greedy selection
+scored on the same data it was fitted to reaches ρ=1.000 at k=5, but
+4.1% of random 5-gate subsets also clear ρ≥0.95. Holding out each model
+in turn, after dropping the three saturated models, the correlation
+falls to **+0.613 at k=5 and +0.288 at k=10**, with intervals that
+span zero, and only recovers near k≈15–20. Do not report a 5- or
+10-gate APFD. The working floor is **15–20 live gates**.
+
+**Published LLM subsetting does not transfer yet.** tinyBenchmarks (100
+of 14K MMLU items), Anchor Points, and Sort & Search all fit item
+parameters on a large pool of *already-evaluated* models (87, ~100,
+31,000). We have 10 models and no verified pack↔task identity join.
+That is why §4.2 claims triage, not "the battery predicts the
+benchmark." Closing this hole is a larger model pool plus a join, not
+another selector.
 
 **APFD / APFD_c is not underpowered here; it is undefined.** APFD asks
 how cheaply a battery identifies the models that do badly on the real
@@ -2030,8 +2064,16 @@ benchmark, so it needs a population of faults that separate models. On
 the curated NL2Repo set the graded rewards are bit-identical across
 terra and luna for 3 of 4 instances (`paillier` 1.000000 / 1.000000,
 `sklearn` 0.985714 / 0.985714, `stamina` 0.983871 / 0.983871). A
-statistic over a near-empty fault population yields no usable statistic,
-so none is reported.
+statistic over a near-empty fault population is not reported.
+
+**Model-level mutation is still open.** E2 tested the *scaffold*. The
+§4.1 / Offutt check is: take a model known to lack capability X and
+confirm the pack for X fires. That still needs no benchmark runs.
+
+**E1b, Qwen E3 completion, vacuity fixes, a compaction arm, and an
+openhands atom adapter** are listed with the experiment table below.
+
+### Claims the ceiling audit retires
 
 **The §2.3 sign test does not survive the ceiling correction.** That
 result counted 15 gates leaving the ceiling against 5 reaching it under
@@ -2058,6 +2100,7 @@ the answer over the cost of getting it:
 | E3 | Hardened battery, 3 seeding arms | IRT | **sol done** (lorem 35/89 off ceiling, traj 15/81); Qwen arms running | items get harder, all models degrade **together**, range CI covers 0 |
 | E4 | Qwen3.8-27B family anchor | IRT / discrimination | **done from existing suite** (`reports/requalify/e4_qwen_vs_gpt56.json`) | <15 of 94 gates separate Qwen from the gpt-5.6 centroid |
 | E5 | BFCL-irrelevance external anchor | Failure recall | **done** — sol 205/240, Qwen 199/240; ranks opposite `overeager_mini`; 8-task seed probe 8/8 on all arms | BFCL irrelevance accuracy is uncorrelated with `overeager_mini` |
+| E6 | Model-level mutation (known-deficient model, pack for X fires) | Mutation | **not run** — E2 was scaffold-only | pack for X stays silent on a model known to lack X |
 
 **E1b has not been run.** The four-arm script exists
 (`scripts/requalify_ceiling_packs.py`, 18 skipped packs × 4 arms × k=10
@@ -2142,8 +2185,7 @@ raw `command` string. Routing `file_editor` on its `command` argument
 and sending `terminal` through the existing shell branch would recover
 the three atom instruments. Until that lands, any cross-harness
 comparison that uses those instruments silently counts openhands
-trajectories as behaviour-free. See the §1.4 replacement at the top of
-this file.
+trajectories as behaviour-free. See §1.4.
 
 **The most likely outcome** is that E3's abandon trigger fires: seeding
 moves gates off ceiling, all four models get worse together, and the
@@ -2169,6 +2211,7 @@ measures task difficulty rather than model-specific capability.
 - Bloat investigation: `reports/bloat/bloat50/INVESTIGATION_bloat_beats_baseline.md`
 - Context-bloat effect analysis (§2.3): `docs/surveys/2026-09-10-context-bloat-effects.md`,
   reproducible from `scripts/bloat_effect_analysis.py`
+- Smoke-test criteria survey (§4): `docs/surveys/2026-09-08-smoke-test-criteria-survey.md`
 
 ---
 

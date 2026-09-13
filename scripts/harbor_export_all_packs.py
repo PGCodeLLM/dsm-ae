@@ -511,7 +511,9 @@ def export_all(output_dir: Path | None = None) -> list[Path]:
     from dsm_ae.packs.registry import list_packs
 
     created: list[Path] = []
-    for pid in list_packs():
+    # Export every registered pack, including ceiling-skipped ones: skipping
+    # controls the default *run* set, not what is available as a Harbor task.
+    for pid in list_packs(include_skipped=True):
         created.append(_export_one_pack(pid, dsm_dir))
 
     # Refresh _template/ with new style (no vendoring)
