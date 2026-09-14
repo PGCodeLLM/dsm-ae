@@ -10,6 +10,9 @@ htmlcov/
 *.pyc
 .venv/
 venv/
+web/node_modules/
+web/dist/
+tmp-layout/
 
 # Local secrets & runtime state (never commit)
 .env

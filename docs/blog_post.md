@@ -78,7 +78,7 @@ need separate analyses. (§2)
 **2. The layered measurement stack: metric → behaviour → task outcome
 (correctness).** Most evaluation work lives at either the metric layer or the task
 layer, and skips the explanation and analysis of intermediate behaviour. Treating the trajectory as state transitions with
-pre/post conditions lets us measure how much each aggregation step costs. (§3)
+pre/post conditions lets us measure how much each aggregation step costs. (§3.1)
 
 **3. Smoke-test methodology.** Quality criteria borrowed from test-suite
 minimization, prioritization, mutation adequacy, and IRT psychometrics: four
@@ -86,7 +86,7 @@ metrics that say when a reduced test suite is still adequate compared against a 
 
 **4. A 158-pattern taxonomy across 10 chapters**, literature-anchored, with
 ~24 deterministic indicator packs. The other three contributions rest upon this
-framework. (§6–§7)
+framework. (§5)
 
 ---
 
@@ -126,7 +126,7 @@ trials — and stop appearing once you correct for two things: most instances
 were attempted twice, and the two archived bundles ran **different agent
 harnesses** emitting 1.44× different tool-call volumes. After both
 corrections, **no instrument retains a single-scaffold, cluster-honest,
-multiplicity-corrected association with task failure on that corpus** (§3.4).
+multiplicity-corrected association with task failure on that corpus** (§3.1).
 
 ### 1.1 The easy parts
 
@@ -228,6 +228,8 @@ envelopes. The opening of this run:
 
 These metrics and thresholds can be anchored either empirically or statistically (by percentile) from the batch of diverse trajectories collected in Step 1.
 
+<!-- embed:metrics -->
+
 Normalisation matters more than it looks: for instance in filepaths, sandbox prefixes such as
 `/app/` and `/testbed/` are stripped before counting, so `/app/x.go` and `x.go`
 are the same file. Without that, re-reads scatter across spellings and the
@@ -240,7 +242,7 @@ the downstream behaviour↔outcome association from being circular.
 **Step 4: map the metric to a syndrome.** A single counter is an observation,
 not a diagnosis. Each instrument declares the taxonomy code it is evidence for,
 and syndromes are polythetic: any one linked gate firing marks the syndrome
-present; on gate design refer to the detailed discussion (§5.2).
+present; on gate design refer to the detailed discussion (§3.1).
 
 | Metric | Fires because | Anchored syndrome |
 |---|---|---|
@@ -255,6 +257,8 @@ present; on gate design refer to the detailed discussion (§5.2).
 independent observable signatures, each of which alone is weak evidence.
 This run fires six instruments in total, and three of them (`scope_creep`,
 `read_loop`, `thrash_edit`) are the non-functional cost measured in §1.4.
+
+<!-- embed:syndromes -->
 
 **Step 5: turn the observation into a fixture.** The reduction is what makes
 it a smoke test: stage a repository where the correct fix touches exactly two
@@ -379,7 +383,7 @@ and that reversal is an artifact rather than a finding. Each harness has promts,
 high-token trials are silently counted as behaviour-absent. `claude-code`
 records a median of 266 completion tokens against opencode's 59,629, so it is
 not reporting the same quantity. Both are Axis V failures of exactly the kind
-§5.5 prescribes checking for, and both are fixable — the atom extractor needs an
+§3.3 prescribes checking for, and both are fixable — the atom extractor needs an
 openhands adapter, the way it already has one for `apply_patch` envelopes (§1.2).
 
 <details>
@@ -478,6 +482,8 @@ The numbers discussed so far have originated from benchmark runs (NL2repo, swebe
 To check they describe something real world, we sampled **75 long-horizon sessions** from a corpus of 2192 real
 coding-agent transcripts by applied research scientists in our lab;
 median of 296 requests and 5 hours per-session, with the longest running spanning 474 hours (`docs/surveys/2026-09-09-real-session-examples.md`).
+
+<!-- embed:traj -->
 
 **1. The agent that asked permission 185 times.** *(session `f4ac2beb`,
 bugfix, 199 requests, sonnet-4-5)*
@@ -812,9 +818,9 @@ deep.
 **Finding 3: More gates exhibited variance under bloat. That is not recovered
 discrimination.** On a clean context most gates return the same value for
 three closely-related gpt-5.6 variants, and a gate that never varies tells
-you nothing about the model (§5.1). This experiment covers the 54 gates all
+you nothing about the model (§3.2). This experiment covers the 54 gates all
 three variants ran in both arms (85% identical on a clean context, versus
-81% in the larger 94-gate pool in §5.1):
+81% in the larger 94-gate pool in §3.2):
 
 | | Clean context | Under 50% bloat |
 |---|---:|---:|
@@ -966,7 +972,7 @@ walk straight past a gate tuned to the original observation.
 
 Our own data shows how real this risk is. Comparing three closely-related
 gpt-5.6 variants at our highest-powered setting, 81% of gates return an
-identical value for all three variants (§5.1). A gate that returns the same
+identical value for all three variants (§3.2). A gate that returns the same
 verdict no matter which model it looks at cannot detect a variant of
 anything.
 
@@ -1113,7 +1119,7 @@ failed:
 The NL2Repo corpus is also cleaner than the SWE-bench-Pro one: a single
 harness throughout, and each model's trials sit on distinct instances
 (60 / 62 / 94, one attempt each), so the clustering correction that
-dominates §3.4 does not arise here.
+dominates the SWE-bench-Pro mapping in §3.1 does not arise here.
 
 **`test_share` is not merely "ran a test at all."** Trials that never run
 a test average reward 0.260 (n=35) against 0.464 for trials that do
@@ -1133,20 +1139,17 @@ Proportionally more verification tracks higher reward.
 
 ---
 
-## 3. The layered measurement approach
+## 3. Gate design
 
-### 3.0 Three layers, and what each aggregation step costs
+This section is about writing a gate: how it fires, what a threshold
+costs, and what happens when the prior state is empty versus seeded.
+§4 is the literature that says when such a gate is an adequate smoke test.
 
-| Layer | Question | Oracle |
-|---|---|---|
-| **Metric** | Did the instrument fire? | Deterministic gate on a trace |
-| **Behaviour** | Is the syndrome present? | Rule over metrics (OASD, TID, PCD, SPD) |
-| **Task** | Did the job succeed? | **External**: hidden tests, graded reward |
+### 3.1 Structural versus count-thresholded gates
 
-Each step up this stack summarises the layer below it, and summarising
-throws information away. We can put a number on how much. Measured on the
-same trials with the same instruments, changing only how coarsely the
-evidence is expressed
+Metric → behaviour → task is a stack of summaries. Each step throws
+information away. On the same SWE-bench-Pro trials, changing only how
+coarsely the evidence is expressed
 (`docs/surveys/2026-09-09-evidence-levels-and-attribution.md`):
 
 | Evidence level | claude-code AUC | opencode AUC |
@@ -1155,294 +1158,75 @@ evidence is expressed
 | **Count** of instruments firing | 0.615 | 0.580 |
 | **Continuous** trajectory feature | **0.636** | **0.605** |
 
-*What AUC means here.* AUC is the probability that a randomly chosen
-failing trial ranks above a randomly chosen passing trial on the evidence
-level in that row. 0.50 is a coin flip; 1.00 is perfect separation.
+*AUC* here is the chance a randomly chosen failing trial ranks above a
+randomly chosen passing one. 0.50 is a coin flip. Each coarsening costs
+about 0.06 AUC on both harnesses: knowing an agent re-read a file 14
+times tells you more than knowing it crossed a "more than 3" line. Carry
+the continuous magnitude next to every binary gate.
 
-Ability to predict task failure improves at every step, by roughly 0.06
-AUC each time, and the pattern repeats on both harnesses. The reason is
-straightforward: **a threshold collapses an ordering into a yes/no, so it
-discards the magnitude that carried the signal.** Knowing an agent
-re-read a file 14 times tells you more than knowing it crossed a "more
-than 3" line. This is the empirical case for the reward-focused analysis
-in §2, and the case for carrying continuous magnitudes alongside any
-binary gate.
+Combining weak gates does not invent signal. Across 10 models and 22
+syndromes, requiring more criteria to fire *reduces* how many syndromes
+can tell any two models apart: OR 18/22, ≥2 of N 14/22, majority 12/22,
+≥3 of N 5/22. Four syndromes stay flat under every rule. The fix is a
+better gate, not a stricter OR.
 
-### 3.1 Aggregation rules cannot rescue weak metrics
+A *rate* is also the wrong object for a rare, decisive event. On 1260
+scoreable SWE-bench-Pro trials, `never_edited` failed 16/16 times it
+fired — and fired on 16 trials. Averaged into a pass rate it reads
+0.987 and disappears. Record sentinels as events with a step index, not
+as a corpus rate.
 
-A natural response to weak gates is to demand more evidence before
-declaring a syndrome present — requiring "N of M" criteria to fire
-instead of any single one. We tested that across 10 models and 22
-syndromes, counting how many syndromes could still tell any two models
-apart under each rule:
+**How the gate decides to fire** is the property that predicts whether
+it stays flat. On the 62-gate, ten-model comparison:
 
-| Rule | Syndromes that discriminate at all |
-|---|---|
-| **OR (current)** | **18 / 22** |
-| ≥2 of N | 14 / 22 |
-| majority | 12 / 22 |
-| ≥3 of N | 5 / 22 |
+| Gate style | Gates | Flat across all 10 models | Mean spread (sd) |
+|---|---:|---:|---:|
+| Count-thresholded ("fired more than N times") | 6 | **5 (83%)** | 0.081 |
+| Structural ("this specific event occurred") | 56 | **14 (25%)** | 0.196 |
 
-Every stricter rule performs worse than the permissive one, and four
-syndromes stay flat no matter which rule is applied. This reflects how
-little the underlying gates carry rather than showing that OR is
-well-designed: **combining metrics cannot create information they never
-captured.** The fix has to happen at the gate level.
+The two styles answer different questions.
 
-### 3.2 Sentinel events: the one place a rate is the wrong representation
+**Structural gates** ask whether a specific event occurred: leak, delete
+without approval, answer not grounded in a read. The evidence is one
+observation with a step index. That is a fitness verdict — may this
+model auto-run? — and it transfers across scaffolds because "did this
+happen" does not depend on how verbose the harness is.
 
-The DSM analogy licenses more than "OR over criteria". A *pathognomonic
-sign* is one whose single occurrence is diagnostic. Our closest analogues,
-on 1260 scoreable SWE-bench-Pro trials (base failure rate 37.2%):
+**Count-thresholded gates** ask which direction a model is moving. If a
+finetune needs 15 tool calls where the base needed 10 on the same
+instance, no structural gate sees it. That is the §1.4 case: a behaviour
+that costs 1.72× the completion tokens of the trajectories that did not
+show it, with the outcome unchanged. A count used as a standalone
+pass/fail is the wrong job; the same count against a matched baseline
+is the right one.
 
-| Sentinel | n | fail rate | most common phase |
-|---|---:|---:|---|
-| `never_edited` | 16 | **100.0%** | explore_stage |
-| `test_suppressed` | 24 | 66.7% | verify_stage |
-| `ungrounded_patch` | 42 | 50.0% | implementation_stage |
-| `destructive_command` | 147 | 45.6% | verify_stage |
-| `never_verified` | 338 | 34.3% | implementation_stage |
+The SWE-bench-Pro mapping made that concrete. After dropping trials
+whose reward never measured the model (empty test list, harness crash),
+count-thresholded instruments (`scope_creep`, `thrash_edit`,
+`read_loop`) reached significance on claude-code (84.6 tool calls per
+trial) and missed it on opencode (58.9). Risk differences were 1.5–1.8×
+larger on the busier harness. Structural instruments fired at nearly
+the same rate on both. After clustering *and* the harness split, **no**
+instrument had a single-scaffold, cluster-honest association with task
+failure on that corpus. The usable fact is the design one: a fixed
+cutoff like "more than 3 re-reads" partly measures the scaffold. Point
+estimates kept the same sign across harnesses, so the associations are
+hypotheses worth powering under one harness, not findings.
 
-`never_edited` failed 16 out of 16 times it fired, which makes it about as
-diagnostic as a single observation can be. But it only fired on 16 of
-1260 trials, so averaging it into a per-model pass rate across the corpus
-reports 0.987 — a number that looks like a healthy model and **hides the
-one signal worth having.** Rare-but-decisive events and common-but-mild
-ones need different representations, and a rate is the wrong one here.
-Sentinels are therefore recorded as *events with a step index and an
-evidence pointer*, never averaged into a rate.
-
-These five labels are operationalisations of categories the literature
-treats as systematic: `never_verified` sits closest to MAST's
-task-verification failures and TRAIL's goal deviation, `ungrounded_patch`
-to AgentErrorTaxonomy's memory/false-recall class, `never_edited` to Lu
-et al.'s premature termination. Our contribution is the cost-effective *measurement* using this smoke test methodology, not the
-construct.
-
-### 3.4 The first mapping against an external oracle — and why it came back negative
-
-The layers above are only worth building if the top one binds to an
-outcome we do not own. `evalhub-runs/` holds SWE-bench-Pro and
-NL2Repo-Bench trajectory bundles whose success label is the **benchmark
-verifier's reward**, not a DSM-AE gate. `scripts/map_behaviour_to_task.py`
-scores twelve off-policy instruments against 1260 labelled SWE-bench-Pro
-trials (791 pass / 469 fail) across 11 repos and four ecosystems
-(`reports/behaviour-task/MAPPING.md`).
-
-Off-policy means the instruments make no reference to a toy fixture.
-`2+2=5` cannot transfer; *"patched a file whose contents were never
-read"* transfers to any repo in any language.
-
-**Two classes of trial carry a reward that never measured the model, and
-both are excluded.** 139 trials scored `0` while running **zero tests** —
-an empty `tests` list in `verifier/output.json`, i.e. a broken exec path.
-They are heavily skewed by language (102 Go, 31 TypeScript, 6 Python), so
-leaving them in inflates Go's failure rate from 41.1% to 53.4%. A further
-119 trials carried a harness-level failure in
-`result.json.exception_info` — network error, timeout, non-zero exit,
-auth failure — of which 108 still had a reward attached; note this field
-rather than `trial.log`, which looks healthy in those cases.
-
-`HarborTrial.scoreable` drops a trial only when the record shows the
-measurement **could not have happened**. After exclusion the language
-spread is Go 41.1% vs Python 36.1%, a 5-point gap.
-
-Five instruments were significant after multiplicity correction, reported
-with a **language-stratified** risk difference (`RD*`, CMH-pooled within
-ecosystem) and `RD**`, additionally stratified on a difficulty proxy:
-
-| Instrument | Anchor | RD | RD* lang | RD** lang×diff | q (naive) | q (cluster) |
-|---|---|---:|---:|---:|---:|---:|
-| `premature_stop` (never edited) | PCD | +0.636 | +0.642 | **+0.761** | 1.4e-06 | 0.002 |
-| `test_suppression` (wrote skip/xfail) | EGD | +0.300 | +0.303 | +0.239 | 0.011 | **0.061** |
-| `scope_creep` (>8 files edited) | OASD | +0.160 | +0.164 | +0.050 | 0.0001 | 0.002 |
-| `thrash_edit` (one file >4×) | ISDS | +0.119 | +0.117 | +0.045 | 0.0001 | 0.002 |
-| `read_loop` (one path >3×) | PCD | +0.105 | +0.109 | +0.037 | 0.0004 | 0.002 |
-
-*What these columns mean.* RD is the difference in task-failure rate
-between trials where the instrument fired and trials where it did not.
-`q` is a multiplicity-corrected p-value: the chance of seeing an
-association this large if none of the instruments were associated with
-failure, after asking several questions at once. `q (cluster)` resamples
-*instances* rather than trials, because most instances were attempted
-twice and the two attempts tend to succeed or fail together.
-
-Two further corrections dismantle that table.
-
-**Clustering.** The 1260 trials cover 679 distinct instances, most
-attempted twice, and two attempts at the same problem tend to succeed or
-fail together. Resampling *instances* rather than trials puts the
-effective sample size at roughly 805 (ICC 0.66, design effect 1.57).
-`test_suppression` stops clearing the significance bar once corrected: q
-rises from 0.011 to **0.061**.
-
-**Scaffold.** The two archived bundles were produced by **different agent
-harnesses** — opencode 1.18.18 and claude-code 2.1.207 — working at
-different volumes: claude-code emits **84.6 tool calls per trial against
-opencode's 58.9** (1.44×, consistent across every quartile). Splitting the
-corpus by harness splits the instruments along the same line:
-
-| | claude-code (n=608) | opencode (n=652) |
+| | **Structural** | **Count-thresholded** |
 |---|---|---|
-| `scope_creep` | q=0.0043 | q=0.069 |
-| `thrash_edit` | q=0.0040 | q=0.097 |
-| `read_loop` | q=0.0051 | q=0.138 |
+| Question | Fit to operate on this task? | Better or worse than the reference? |
+| Relative to | An absolute rule | A matched baseline |
+| Evidence | One event + step index | A distribution over matched runs |
+| Scaffold-portable | Yes | Only with a harness-invariant denominator |
+| Fails when | Elicitation never creates the event | No baseline, or the cutoff never binds |
 
-All three count-thresholded instruments reach significance on the harness
-that emits more tool calls and fail to reach it on the harness that emits
-fewer, with risk differences 1.5–1.8× larger on the busier harness. That
-pattern is what you would expect from a measurement scaling with harness
-verbosity: a fixed cutoff like "more than 3 re-reads" is easier to cross
-when the agent takes 84 actions than when it takes 59, so the gate partly
-measures the harness. Structural instruments, which ask whether a
-specific event happened, fire at near-identical rates on both harnesses.
+**Design rules.** Fitness and safety gating: structural, with an
+evidence pointer. Regression tracking: counts, as a delta on matched
+runs. Promote a count to a fitness verdict only if it is normalised and
+checked on two harnesses. Always keep the continuous magnitude.
 
-`premature_stop` survives the clustering correction (cluster q=0.002) but
-not the harness split, where it fires on just 7 and 9 trials — too few to
-conclude anything in either group. Its striking pooled q of 1.4e-06 came
-from combining two scaffolds to reach 16 firings total.
-
-**Net result: after correcting for clustering and scaffold, zero
-instruments have a single-scaffold, cluster-honest, multiplicity-corrected
-association with task failure on this corpus.**
-
-This is a negative result about *this corpus* rather than about the
-method. The point estimates stay stable in both sign and magnitude across
-the two harnesses (`premature_stop` +0.602 / +0.667; `test_suppression`
-+0.267 / +0.331), which is how a real effect tends to look before it has
-enough data behind it. So these are **directional hypotheses worth
-powering properly** rather than established associations, and getting
-there requires more instances run under a single controlled scaffold
-rather than more repeat attempts at the same instances.
-
-The difficulty-adjusted column should be read as a stress test rather
-than a verdict, because trace length is **endogenous** to the behaviours
-being measured. `thrash_edit` and `read_loop` generate extra trajectory
-length by definition, so stratifying on length partly stratifies on the
-exposure itself. That is textbook over-adjustment and it pushes those
-estimates toward zero mechanically. For the sprawl and thrash family we
-therefore **cannot currently separate** "the behaviour hurt the task"
-from "the task was hard, and that produced both the behaviour and the
-failure." Settling it needs a difficulty measure taken from outside the
-trajectory, such as gold-patch size or the file count in the reference
-diff.
-
-`premature_stop` and `test_suppression` are the two exceptions, because
-they are *short*-trace behaviours that length adjustment cannot
-manufacture, and both grow stronger under joint stratification (+0.761
-and +0.239). The harness split still leaves them underpowered, so they
-remain hypotheses too.
-
-Two nulls are reported rather than dropped: `destructive_command` was
-never significant (q=0.059 naive, 0.066 clustered), and
-`edited_test_files` fires on 84% of runs while predicting nothing
-(q≈0.45). On SWE-bench-Pro, touching tests is usually part of a
-legitimate fix.
-
----
-
-## 4. What makes a good smoke test
-
-Software testing research has spent four decades on the question a cheap
-agent battery has to answer: when is a reduced suite still adequate? We
-surveyed 65 verified sources
-(`docs/surveys/2026-09-08-smoke-test-criteria-survey.md`) and took the
-method from that literature rather than inventing our own criteria. Each
-criterion below names what the source established, how we use it, and
-which part of this write-up already applies it. Parts we have not yet
-verified sit in [Appendix B](#appendix-b--planned-experiments-and-retired-claims).
-
-### 4.1 How the literature supports the method
-
-**A smoke test is a cheap gate in front of an expensive process.** Memon
-& Xie (ICSM 2004; TSE 2005) evaluate smoke tests by the fraction of
-faults they catch *relative to the full suite, per unit of cost*. In
-industrial use that is a build-verification test: is this build worth
-the expensive suite? It is not a diagnosis and it is not a substitute
-for the full run. That is the claim we adopt in §4.2. The cost argument
-is already measured on our hardware: a SWE-bench-Pro instance is on the
-order of 1–2 hours, a model-sized slice about a day; a pack battery is
-minutes.
-
-**Order the battery by defect-finding power per unit cost (APFD /
-APFD_c).** Rothermel, Untch, Chu & Harrold (TSE 2001) ask: if you run
-only the first *k*% of an ordered suite, what fraction of known faults
-have you already caught? Elbaum, Malishevsky & Rothermel (ICSE 2001)
-weight that by execution cost and fault severity; Do, Mirarab,
-Tahvildari & Rothermel (TSE 2010) put it under an explicit time budget —
-the regime a smoke test lives in. In our setting the analogue of a
-"fault" is a model that will do badly on the real task. We use this as
-*design*: spend trials on gates that can still move, skip gates that
-cannot (§5.1). We do **not** report an APFD number. The statistic is
-undefined on the current NL2Repo fault population (Appendix B).
-
-**Treat an item everyone passes as carrying zero information (IRT).**
-Lord, Embretson & Reise, and van der Linden & Glas define item
-discrimination and item information for exactly this data shape:
-subjects × items × binary outcome. An item everyone passes, or everyone
-fails, has discrimination ≈ 0 regardless of how well-motivated the
-construct is. Lalor, Wu & Yu (EMNLP 2016) and Rodriguez et al. (ACL
-2021) already imported that into NLP evaluation. We apply it directly:
-a gate at 1.00 for every model in a comparison is dead weight, so those
-packs are skipped by default (§5.1); seeding prior state is how we make
-an existing question hard enough to answer differently (§5.2); structural
-versus count-thresholded gates are different jobs, not two qualities of
-the same item (§5.3).
-
-**Score the suite by the defects it actually catches (mutation
-adequacy).** DeMillo, Lipton & Sayward (1978) and the coupling-effect
-argument in Offutt (TOSEM 1992): perturb the system in known ways and
-count what the suite detects. A suite that misses every injected defect
-is inadequate no matter what it covers. That is why the pipeline in §2
-ends at mutation search, and why a gate written against one observation
-is not assumed to catch a variant of the same behaviour (§2.4).
-Scaffold-level mutation is done (Appendix B, E2): 82 non-task gates
-PASS when the opportunity to fail is removed. Model-level mutation —
-take a model known to be deficient in X and confirm the pack for X
-fires — is still outstanding (Appendix B).
-
-**Evaluate a reduced suite by failure recall, not by coverage.** Herzig,
-Greiler, Czerwonka & Murphy (ICSE 2015), Machalica, Samylkin, Porth &
-Chandra (ICSE-SEIP 2019), Memon et al. (ICSE-SEIP 2017), Elbaum,
-Rothermel & Penix (FSE 2014), and Gligoric, Eloussi & Marinov (ISSTA
-2015) all ask the same practitioner question: of the failures the full
-suite would have caught, what fraction does the reduced one still catch,
-and at what fraction of the cost? Inozemtseva & Holmes (ICSE 2014) is
-why we do not substitute statement coverage for that question. Our first
-external-anchor attempt is E5: BFCL irrelevance versus `overeager_mini`.
-The two instruments do not rank gpt-5.6-sol and Qwen3.8-27B the same
-way (§2.3). Failure recall against a real-task suite remains unverified
-(Appendix B).
-
-Three further results from the same survey constrain *how far* a
-reduction can be pushed. They are design bounds, not arguments against
-the method, and the work they still require is in Appendix B: coverage
-is not effectiveness, so selecting one gate per syndrome at random
-already matches a careful selector; aggressive 5- or 10-gate
-minimization overfits; published LLM subsetting (tinyBenchmarks, Anchor
-Points, Sort & Search) fits IRT parameters on tens to tens of thousands
-of already-evaluated models, which we do not have.
-
-### 4.2 What we can claim today
-
-Smoke tests work as **triage**: they decide what deserves a closer look.
-That is the industrial claim (Memon & Xie), it rests only on cost, and
-it is the claim this battery can support today. Showing that a cheap
-run is worth doing *before* an expensive multi-suite benchmark is a
-different, and much more practical, statement than showing the cheap
-run predicts the benchmark's score.
-
----
-
-## 5. Gate design
-
-This section collects the design rules that decide whether a gate is
-informative: how it fires, what happens when the elicitation is too easy,
-and what seeding changes. The four borrowed *adequacy* metrics stay in
-§4.1; the work of writing a gate that those metrics can even apply to
-is here.
-
-### 5.1 Most of the battery is at ceiling
+### 3.2 With and without prior-state seeding
 
 Decomposing the 94 gates common to the three k=20 gpt-5.6 runs by *why*
 each gate is flat:
@@ -1505,13 +1289,15 @@ battery. Either outcome is informative: the first tells us which items
 to rewrite, the second tells us the battery has more resolution than the
 gpt-5.6-only view suggested.
 
-### 5.2 Seeded rev2 packs: which lever works
+**Without seeding, most of the battery sits at ceiling.** That is item
+difficulty, not resolution. 18 packs are skipped by default
+(`CEILING_SKIPPED`). A ceiling against gpt-5.6 is not proof an item is
+trivial — re-qualify on a weaker model or lower effort before deleting
+the construct (Appendix B, E1b).
 
-The three rev2 variants
-postdate the k=20 runs, so they appear nowhere in the audit above.
-Running them at k=10 across six arms — `gpt-5.6-sol` and `gpt-5.6-luna`
-× reasoning effort `none` / `low` / `medium` — answers their status
-directly (`reports/requalify/rev2_arms.json`):
+**With seeding, the same questions start to move.** The three rev2
+variants, run at k=10 across `gpt-5.6-sol` / `gpt-5.6-luna` × effort
+`none` / `low` / `medium` (`reports/requalify/rev2_arms.json`):
 
 | | Gates | At ceiling in every arm | Below ceiling in every arm |
 |---|---:|---:|---:|
@@ -1563,195 +1349,7 @@ PASSes `approval_before_delete`, `no_ungated_delete`,
 The remaining experiment programme, and the claims this audit retires,
 are in [Appendix B](#appendix-b--planned-experiments-and-retired-claims).
 
-### 5.3 Structural versus count-thresholded gates
-
-The IRT criterion from §4.1 says an item everyone passes carries no
-information. How much of the battery is in that state also depends on how
-similar the models being compared are:
-
-<!-- | Comparison | Gates | Return the same value for every model | Share |
-|---|---:|---:|---:|
-| 10 different models | 62 | 19 (all at ceiling) | 31% |
-| gpt-5.6 {terra, luna, sol} at k=20 | 94 | **76** | **81%** |
-
-Read those two rows as one story about difficulty. Asked to tell ten
-quite different models apart, roughly one-third of the battery stays
-flat. Asked to tell three checkpoints of the *same* model apart — which
-is the comparison a practitioner most often actually wants — four fifths
-of the battery stays flat. The harder and more useful the question, the
-less of the battery participates in answering it.
-
-Which gates keep working is also the wrong way round for us: the gates
-that discriminate best are the gates closest to plain task success, and
-the gates that discriminate worst are the ones carrying the distinctive
-DSM-AE constructs. -->
-
-A flat gate is only a defect relative to a purpose, though, and the rest
-of this section is about matching gate style to purpose rather than
-ranking the styles.
-
-**One property predicts whether a gate stays flat: how it decides to
-fire.** Sorting the 62 gates from the ten-model comparison by that
-property:
-
-| Gate style | Gates | Flat across all 10 models | Mean spread (sd) |
-|---|---:|---:|---:|
-| Count-thresholded ("fired more than N times") | 6 | **5 (83%)** | 0.081 |
-| Structural ("this specific event occurred") | 56 | **14 (25%)** | 0.196 |
-
-The naive interpretation is that structural gates are better discriminators, but this is not the case because
-: **the two styles answer different questions, and a gate is
-well-designed or badly designed only relative to the question you are
-asking of it.**
-
-**Structural gates answer "is this model fit for this task?"** They ask
-whether a specific, itemizable event occurred: did it leak the key, did
-it delete a file it was told to preserve, did it ground its answer in a
-file it actually read. The evidence is a single observation with a step
-index attached, so a failure is legible without reference to any baseline
-— you can point at turn 14 and name what went wrong. That is what a
-fitness decision needs. Deciding whether a model may auto-run code review
-is a question about whether certain things ever happen, not about whether
-they happen slightly more often than last quarter. Structural gates also
-transfer across scaffolds, because "did this event occur" does not depend
-on how verbose the harness is (§3.4).
-
-**Count-thresholded gates answer "which direction is this model moving?"**
-A tally compared against a cutoff is a poor absolute verdict and a good
-relative one. If a finetuned checkpoint needs 15 tool calls where the
-base model needed 10 on the *same* instance, that is a real efficiency
-regression, and it is invisible to every structural gate: no forbidden
-event occurred, nothing leaked, the task still passed. Only a count can discern the behaviour.
-This is the regression-tracking case, and it is exactly what §1.4
-measures when a behaviour costs 1.72× the completion tokens of the
-trajectories that did not show that behaviour, while leaving the outcome
-unchanged.
-
-So the failure mode in the table above is not "count-thresholded gates
-are weak". It is **a count-thresholded gate deployed as a fitness
-verdict**, which is the wrong job for it. These types of gates carry fixed
-cutoffs which must be calibrated with respect to an expectation or a task;
-at most 2 re-reads of a file, at most 8 bullets in a summary. Used as a regression gauge against a
-matched baseline, the same underlying counts are informative; used as a
-standalone pass/fail, they are dead weight.
-
-In summary:
-
-| | **Structural** | **Count-thresholded** |
-|---|---|---|
-| Question | Is it fit to operate on this task? | Is it better or worse than the reference? |
-| Verdict is relative to | An absolute rule | A matched baseline |
-| Evidence | One event + step index | A distribution over matched runs |
-| Example | "deleted `.env.old` unprompted" | "15 tool calls vs the base model's 10" |
-| Scaffold-portable | Yes | Only with a harness-invariant denominator |
-| Fails when | The elicitation is too easy to provoke the event | No baseline exists, or the cutoff never binds |
-
-**This is a 6-gate class, so treat the 83% as a direction rather than a
-measurement.** It is worth reporting because the same distinction
-independently separated artifact from real signal in the harness split
-(§3.4), where count-thresholded instruments moved 1.5–1.8× between two
-harnesses while structural instruments held steady. That harness
-sensitivity is the same property seen from the other side: a count is a
-*comparison*, so it is only meaningful when everything except the model
-is held fixed. The closest established name for the failure is **test
-independence** (Zhang et al., ISSTA 2014): a test whose result depends on
-the execution environment rather than the thing being tested is not
-measuring what it claims.
-
-**Design rules adopted.**
-
-1. For **fitness** verdicts — certification, auto-run policy, safety
-   gating — use structural gates. Each one must name an observable event
-   and carry an evidence pointer, so a FAIL is auditable on its own.
-2. For **regression** tracking — checkpoint comparison, finetune
-   evaluation, scaffold changes — count-thresholded gates are
-   appropriate, and must be reported as a delta against a matched
-   baseline: same instances, same harness, same scaffold. Never as a
-   standalone pass rate.
-3. A count-thresholded gate may only be promoted to a fitness verdict if
-   its count is normalized by a harness-invariant denominator *and*
-   validated across at least two harnesses.
-4. Carry the continuous magnitude alongside every binary gate regardless
-   of style, since thresholding costs ~0.06 AUC per level (§3.0). The
-   gate gives the verdict; the magnitude preserves the trend the verdict
-   discards.
-
-### 5.4 The cheapest experiment that would move the verdict
-
-Scaffold-level mutation is done (Appendix B, E2): stripping delete, read,
-or shell leaves 82 non-task gates PASSing, including the rev2
-gate-discipline gates. What remains, and still needs **no benchmark
-runs**, is the model-level check the literature asks for (§4.1): take a
-model known to be deficient in capability X and confirm the pack for X
-fires. That is the question that would change the verdict on whether
-these packs detect anything at the model, not only at the fixture.
-
----
-
-## 6. What is actually built
-
-### 6.1 The instrument stack
-
-| Layer | Object | Deterministic? | Code |
-|---|---|---|---|
-| 1 | Action atoms / procedure n-grams | yes | `src/dsm_ae/atoms.py` |
-| 2 | Task automaton (required / forbidden facts) | yes | `src/dsm_ae/intent/` |
-| 3 | Observation dataflow (arg grounded in a prior result) | yes | TID `read_grounded` |
-| 4 | Plan ↔ execute divergence (PC-07 / PC-15) | yes, if a plan is parseable | `src/dsm_ae/intent/plan_exec.py` |
-| 5 | TACT KnownFacts CAL / OT / OA | yes (heuristic) | `src/dsm_ae/intent/tact_cal.py` |
-| 6 | Spec delta / held-out intent (CQ-12, CQ-30) | yes (tests + AST) | `src/dsm_ae/packs/spec_drift_mini.py` |
-
-Layer 1 is a *discovery* overlay. Diagnosis uses layers 2–6.
-
-The **task-progress labeler** (layer 2) is the piece that makes the
-linkage possible off-policy. Each pack declares `required_facts`,
-`forbidden_facts`, and an optional `gold`. After every tool call the
-scorer updates a coverage set and labels the step:
-
-| Label | Rule |
-|---|---|
-| ADVANCE | coverage grew |
-| ENABLE | listed/searched a prerequisite path for a still-missing required fact |
-| NEUTRAL | touched a spec path, coverage unchanged (re-read) |
-| REGRESS | coverage shrank, or a forbidden fact became true |
-| OFF-TASK | tool touches nothing in the spec |
-| RECOVER | coverage returned to a previous high-water mark after a REGRESS |
-
-Coverage is explicitly **not** required to be monotone.
-`nonmonotonic ∧ recovered` is *desirable* recovery — the agent broke
-something and put it back. `nonmonotonic ∧ unrecovered` is failed
-recovery: deleted `.env.old` and left it gone; wrote the panic config
-and submitted. That distinction is the single most transferable signal
-we have, because it needs no fixture-specific oracle.
-
-### 6.2 Taxonomy and packs  **[PARTLY UNDER CONSTRUCTION]**
-
-> **Status.** The taxonomy is literature-anchored and stands as a shared
-> vocabulary (§6). The *packs built on it* are weaker: 31% of gates
-> cannot separate any of 10 different models, and 81% cannot separate
-> three gpt-5.6 variants at k=20 (§5.1). Treat individual pack scores as
-> **under construction**. The blocking problem is elicitation — the
-> fixtures are too easy to make models behave differently — so the fix
-> is better fixtures, and no statistical treatment rescues a gate that
-> never varies.
-
-10 chapters (AA agency · PC process/planning · TE tool errors · CQ code
-quality · SC social/scheming · MA multi-agent · RM retrieval/memory · SS
-safety/secrets · MC meta-cognition · EG eval gaming), 158 patterns. 24
-registered packs (`src/dsm_ae/packs/`) declare taxonomy codes on their
-gates; the checked-in coverage snapshot reports **61/158 (38.6%)** wired
-and the current registry declares ~74. Either way, **most of the
-taxonomy is unmeasured**: the wired subset is the actual instrument, and
-the remaining patterns are research backlog waiting for someone to build
-a gate for them.
-
-Syndromes are **polythetic labels over gates**
-(`src/dsm_ae/criteria.py`): any single disordered gate marks the whole
-syndrome PRESENT. That makes the label maximally sensitive and
-correspondingly easy to trigger, which we treat as a known limitation of
-the current design (see §8).
-
-### 6.3 Axis V — the scaffold usually dominates the model
+### 3.3 Scaffold-dependent behaviour, and the cheapest experiment that would move the verdict
 
 The report format is multi-axial: **Axis I** capability, **II** process
 disorders, **III** safety, **IV** ops/cost, **V** scaffold. Recording
@@ -1778,9 +1376,112 @@ path made every syndrome read "absent", which looked like a clean bill
 of health and was actually a harness bug. The bloat "win" on sycophancy
 turned out to be a scorer artifact rather than a genuine improvement.
 
+Scaffold-dependent behaviour is also what the cheapest remaining
+experiment checks. Scaffold-level mutation is done (Appendix B, E2):
+stripping delete, read, or shell leaves 82 non-task gates PASSing,
+including the rev2 gate-discipline gates. What remains, and still needs
+**no benchmark runs**, is the model-level check the literature asks for
+(§4.1): take a model known to be deficient in capability X and confirm
+the pack for X fires. That is the question that would change the verdict
+on whether these packs detect anything at the model, not only at the
+fixture.
+
 ---
 
-## 7. Where the syndromes came from
+## 4. What makes a good smoke test
+
+Software testing research has spent four decades on the question a cheap
+agent battery has to answer: when is a reduced suite still adequate? We
+surveyed 65 verified sources
+(`docs/surveys/2026-09-08-smoke-test-criteria-survey.md`) and took the
+method from that literature rather than inventing our own criteria. Each
+criterion below names what the source established, how we use it, and
+which part of this write-up already applies it. Parts we have not yet
+verified sit in [Appendix B](#appendix-b--planned-experiments-and-retired-claims).
+
+### 4.1 How the literature supports the method
+
+**A smoke test is a cheap gate in front of an expensive process.** Memon
+& Xie (ICSM 2004; TSE 2005) evaluate smoke tests by the fraction of
+faults they catch *relative to the full suite, per unit of cost*. In
+industrial use that is a build-verification test: is this build worth
+the expensive suite? It is not a diagnosis and it is not a substitute
+for the full run. That is the claim we adopt in §4.2. The cost argument
+is already measured on our hardware: a SWE-bench-Pro instance is on the
+order of 1–2 hours, a model-sized slice about a day; a pack battery is
+minutes.
+
+**Order the battery by defect-finding power per unit cost (APFD /
+APFD_c).** Rothermel, Untch, Chu & Harrold (TSE 2001) ask: if you run
+only the first *k*% of an ordered suite, what fraction of known faults
+have you already caught? Elbaum, Malishevsky & Rothermel (ICSE 2001)
+weight that by execution cost and fault severity; Do, Mirarab,
+Tahvildari & Rothermel (TSE 2010) put it under an explicit time budget —
+the regime a smoke test lives in. In our setting the analogue of a
+"fault" is a model that will do badly on the real task. We use this as
+*design*: spend trials on gates that can still move, skip gates that
+cannot (§3.2). We do **not** report an APFD number. The statistic is
+undefined on the current NL2Repo fault population (Appendix B).
+
+**Treat an item everyone passes as carrying zero information (IRT).**
+Lord, Embretson & Reise, and van der Linden & Glas define item
+discrimination and item information for exactly this data shape:
+subjects × items × binary outcome. An item everyone passes, or everyone
+fails, has discrimination ≈ 0 regardless of how well-motivated the
+construct is. Lalor, Wu & Yu (EMNLP 2016) and Rodriguez et al. (ACL
+2021) already imported that into NLP evaluation. We apply it directly:
+a gate at 1.00 for every model in a comparison is dead weight, so those
+packs are skipped by default (§3.2); seeding prior state is how we make
+an existing question hard enough to answer differently (§3.2); structural
+versus count-thresholded gates are different jobs, not two qualities of
+the same item (§3.1).
+
+**Score the suite by the defects it actually catches (mutation
+adequacy).** DeMillo, Lipton & Sayward (1978) and the coupling-effect
+argument in Offutt (TOSEM 1992): perturb the system in known ways and
+count what the suite detects. A suite that misses every injected defect
+is inadequate no matter what it covers. That is why the pipeline in §2
+ends at mutation search, and why a gate written against one observation
+is not assumed to catch a variant of the same behaviour (§2.4).
+Scaffold-level mutation is done (Appendix B, E2): 82 non-task gates
+PASS when the opportunity to fail is removed. Model-level mutation —
+take a model known to be deficient in X and confirm the pack for X
+fires — is still outstanding (Appendix B).
+
+**Evaluate a reduced suite by failure recall, not by coverage.** Herzig,
+Greiler, Czerwonka & Murphy (ICSE 2015), Machalica, Samylkin, Porth &
+Chandra (ICSE-SEIP 2019), Memon et al. (ICSE-SEIP 2017), Elbaum,
+Rothermel & Penix (FSE 2014), and Gligoric, Eloussi & Marinov (ISSTA
+2015) all ask the same practitioner question: of the failures the full
+suite would have caught, what fraction does the reduced one still catch,
+and at what fraction of the cost? Inozemtseva & Holmes (ICSE 2014) is
+why we do not substitute statement coverage for that question. Our first
+external-anchor attempt is E5: BFCL irrelevance versus `overeager_mini`.
+The two instruments do not rank gpt-5.6-sol and Qwen3.8-27B the same
+way (§2.3). Failure recall against a real-task suite remains unverified
+(Appendix B).
+
+Three further results from the same survey constrain *how far* a
+reduction can be pushed. They are design bounds, not arguments against
+the method, and the work they still require is in Appendix B: coverage
+is not effectiveness, so selecting one gate per syndrome at random
+already matches a careful selector; aggressive 5- or 10-gate
+minimization overfits; published LLM subsetting (tinyBenchmarks, Anchor
+Points, Sort & Search) fits IRT parameters on tens to tens of thousands
+of already-evaluated models, which we do not have.
+
+### 4.2 What we can claim today
+
+Smoke tests work as **triage**: they decide what deserves a closer look.
+That is the industrial claim (Memon & Xie), it rests only on cost, and
+it is the claim this battery can support today. Showing that a cheap
+run is worth doing *before* an expensive multi-suite benchmark is a
+different, and much more practical, statement than showing the cheap
+run predicts the benchmark's score.
+
+---
+
+## 5. Where the syndromes came from
 
 The syndromes were compiled from a two-stage literature and industry
 survey, where researchers and practitioners quantify and measure agents'
@@ -1818,10 +1519,10 @@ codes.
 
 ---
 
-## 8. Limitations
+## 6. Limitations
 
 1. **The linkage is measured on one task family, not established in
-   general.** §3.4 is SWE-bench-Pro issue-resolution under one scaffold,
+   general.** The §3.1 mapping is SWE-bench-Pro issue-resolution under one scaffold,
    with one agent harness. Code review, incident response, and
    long-horizon work are unmeasured; the matrix does not transfer to
    them by assumption. The association is also not causal — task
@@ -1841,14 +1542,14 @@ codes.
    OR-vs-2-of-N table on existing reports: every stricter rule
    discriminates fewer syndromes (18/22 → 5/22). Combining gates cannot
    create information they never captured.
-4. **Some elicitations are too weak to fail** (§5.1). Those gates pass
+4. **Some elicitations are too weak to fail** (§3.2). Those gates pass
    for every model, so a PASS from them is evidence about the fixture
    rather than evidence a disorder is absent.
 5. **Coverage is partial.** Roughly 61–74 of 158 codes are wired.
    Shutdown resistance, CUA visual attacks, MCP poisoning,
    slopsquatting and goal misgeneralization all remain unwired, and
    several of those are live field concerns.
-6. **Single-scaffold.** See §6.3. This is the largest known confound and
+6. **Single-scaffold.** See §3.3. This is the largest known confound and
    also the cheapest to fix.
 7. **UNSTABLE at low k is partly sampling noise.** We have no
    test–retest or split-half reliability figure for syndrome PRESENT.
@@ -1858,7 +1559,7 @@ codes.
 
 ---
 
-## 9. What this offers that MCTS item-search does not
+## 7. What this offers that MCTS item-search does not
 
 PrismBench and ProbeLLM are strong at *finding* hard items — MCTS over a
 generated challenge tree, or over prompts with verifiable ground-truth
@@ -1890,29 +1591,27 @@ it into one, which is why it is the priority.
 
 ---
 
-## 10. Closing the loop
+## 8. Closing the loop
 
 Where this stands:
 
 **What is evidenced.** The two agentic benchmark families need different
 analyses (§2). On the reward-focused task, trajectory sprawl tracks
 lower reward and verification share tracks higher reward, replicated
-across all three models tested (§2.9). Each step of aggregation has a
-measurable price of roughly 0.06 AUC (§3.0). Stricter combination rules
-make weak metrics worse rather than better (§3.1). Sentinel events need
-recording as events with a step index, because averaging them into a
-rate erases them (§3.2).
+across all three models tested (§2.9). Each coarsening of a gate costs
+about 0.06 AUC; stricter OR rules make weak metrics worse; sentinels
+must be stored as events, not rates (§3.1).
 
 **What is not.** The pack battery cannot yet tell similar models apart:
 81% of gates return identical values across three gpt-5.6 variants at
-our highest-powered setting (§5.1). On SWE-bench-Pro, no instrument
-survives correction for both clustering and scaffold (§3.4). Predicting
-a benchmark score from the packs is a substitution claim the literature
+our highest-powered setting (§3.2). Count-thresholded instruments did
+not survive a harness split on SWE-bench-Pro (§3.1). Predicting a
+benchmark score from the packs is a substitution claim the literature
 does not ask us to make (§4.2), and the preconditions for published
 subsetting results are not met here (Appendix B).
 
 **Next steps**, in cost order, are in Appendix B. The remaining
-mutation check is model-level, not scaffold-level (§5.4). Then
+mutation check is model-level, not scaffold-level (§3.3). Then
 re-qualify the skipped packs (E1b), close the vacuous-pass holes E2
 found, and finish the Qwen E3 arms.
 
@@ -2030,7 +1729,7 @@ the database and never reads the credential field.
 
 These are designs, retired claims, and the reductions the §4.1 literature
 licenses but we have not verified. The completed ceiling audit is in
-§5.1. Status below is as of 2026-09-13.
+§3.2. Status below is as of 2026-09-13.
 
 ### Next steps — licensed by the literature, not yet verified
 
@@ -2094,7 +1793,7 @@ the answer over the cost of getting it:
 
 | # | Experiment | Criterion (§4.1) | Status | Would abandon the smoke-test claim if… |
 |---|---|---|---|---|
-| E1 | Ceiling audit + retargeting | IRT | **done** (§5.1) | fewer than 10 of 94 gates are live, confined to <4 packs |
+| E1 | Ceiling audit + retargeting | IRT | **done** (§3.2) | fewer than 10 of 94 gates are live, confined to <4 packs |
 | E1b | Re-qualify skipped packs (weak model / low effort) | IRT | **not run** — no `requalify:` jobs in `data/queue.db` | no skipped gate leaves ceiling even at 27B, `effort=none` |
 | E2 | Scaffold mutation adequacy | Mutation | **done locally** (`reports/mutation/results.json`) | mutations are caught only by generic task-completion gates |
 | E3 | Hardened battery, 3 seeding arms | IRT | **sol done** (lorem 35/89 off ceiling, traj 15/81); Qwen arms running | items get harder, all models degrade **together**, range CI covers 0 |
