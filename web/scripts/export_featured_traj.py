@@ -16,10 +16,10 @@ ROOT = Path(__file__).resolve().parents[2]
 DEST = ROOT / "reports" / "blog" / "trajectories"
 
 FEATURED = (
-    ("f4ac2beb", "185 permission refusals"),
-    ("0614e0de", "tmux → 83 edits / 9 files"),
-    ("b52e0124", "51-hour sleep 60 loop"),
-    ("40b0660e", "62 consecutive Edit refusals"),
+    ("f4ac2beb", "Scenario 1: 185 permission refusals"),
+    ("0614e0de", "Scenario 2: tmux → 83 edits / 9 files"),
+    ("b52e0124", "Scenario 3: 51-hour sleep 60 loop"),
+    ("40b0660e", "Scenario 4: 62 consecutive Edit refusals"),
 )
 
 sys.path.insert(0, str(ROOT / "web" / "scripts"))

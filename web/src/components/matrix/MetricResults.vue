@@ -43,15 +43,15 @@ const { data, error, visibleModels, cellFor } = useMatrix();
 </template>
 
 <style scoped>
-.block { margin: 0 0 20px; }
-.legend { display: flex; align-items: center; gap: 8px; font-size: 12px; color: #444; margin: 0 0 8px; }
+.block { margin: 0 0 10px; }
+.legend { display: flex; align-items: center; gap: 8px; font-size: 12px; color: #444; margin: 0 0 4px; }
 .bar {
   width: 160px; height: 10px; border: 1px solid #999;
   background: linear-gradient(90deg, rgb(165,0,38), rgb(255,255,191), rgb(0,104,55));
 }
 .panel { overflow-x: auto; border: 1px solid #ccc; }
-table { border-collapse: separate; border-spacing: 0; font-size: 12px; width: max-content; min-width: 100%; }
-th, td { border: 1px solid #ccc; padding: 2px 5px; text-align: center; }
+table { border-collapse: separate; border-spacing: 0; font-size: 8px; width: max-content; min-width: 100%; }
+th, td { border: 1px solid #ccc; padding: 1px 1px; text-align: center; }
 th.corner, th.row { text-align: left; position: sticky; left: 0; background: #fafafa; z-index: 1; }
 thead th { background: #f5f5f5; position: sticky; top: 0; }
 td.not-run { background: #eee; color: #555; font-style: italic; }

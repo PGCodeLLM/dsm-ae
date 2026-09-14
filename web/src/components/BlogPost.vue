@@ -65,8 +65,8 @@ watch(sections, draw, { flush: "post" });
   background: #f6f8fa; border: 1px solid #d0d7de; padding: 10px 12px;
   overflow-x: auto; border-radius: 4px;
 }
-.blog :deep(table) { border-collapse: collapse; font-size: 13px; }
-.blog :deep(th), .blog :deep(td) { border: 1px solid #ccc; padding: 4px 8px; }
+.blog :deep(table) { border-collapse: collapse; font-size: 11px; }
+.blog :deep(th), .blog :deep(td) { border: 1px solid #ccc; padding: 2px 4px; }
 .blog :deep(.mermaid) { margin: 12px 0 16px; overflow-x: auto; }
 .embed-block { margin: 16px 0 24px; overflow-x: auto; }
 </style>

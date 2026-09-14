@@ -32,9 +32,9 @@ belong to the model versus the scaffold.
 
 That is not a claim that the second agent is worse at programming. It may be
 equally capable and still fail non-functional requirements. Capability gaps
-need better training data; behavioural problems need a better scaffold — a
+need better training data; behavioural problems need a better scaffolds such as a
 permission prompt, tools that fail loudly instead of swallowing exceptions, a
-workflow that says "read before you patch" — or training that rewards
+workflow that says "read before you patch", or training that rewards
 efficient trajectories.
 
 Our contribution is a set of cheap smoke tests that diagnose these behavioural
@@ -75,7 +75,7 @@ studied real user trajectories collected by staff from our research lab. Within 
 benchmarks split into *workflow-structured* and *reward-shaped* tasks that
 need separate analyses. (§2)
 
-**2. The layered measurement stack: metric → behaviour → task outcome
+**2. Order of granularity: metric → behaviour → task outcome
 (correctness).** Most evaluation work lives at either the metric layer or the task
 layer, and skips the explanation and analysis of intermediate behaviour. Treating the trajectory as state transitions with
 pre/post conditions lets us measure how much each aggregation step costs. (§3.1)
@@ -104,8 +104,8 @@ consistent sign in every cell:
 
 At the metric layer, longer and more sprawling trajectories correlate with a
 worse correctness score, and a higher share of verification steps correlates
-with a better one. That condensed "correctness" score misses the next layer
-up — __behaviours__:
+with a better one. But these stats alone do not explain the connection between the models'
+actions and final reward, that requires analysis on the higher level of behaviours.
 
 **behaviours that leave the outcome unchanged still cost real money.** Among
 SWE-bench-Pro runs that all *succeeded*, behaviourally-ill trajectories flagged with `read_loop` present spent 1.74× the
@@ -113,20 +113,11 @@ completion tokens [1.40, 1.96], and trajectories with `scope_creep` present edit
 3 would do**. A correctness-only oracle verifier would have scored these identically to an efficient agent
 run (§1.4).
 
-These are not artifacts of benchmark conditions. In 75 human sessions of
-real agent use, we discovered one agent that requested permission for the same
+These are not artifacts of benchmark studied: in 75 sessions of
+real agent use collected from our lab members' usage, we discovered one agent that requested permission for the same
 command **185 times** and never indicated to the user that it was blocked, and another that
 spent **1337 requests over 51 hours** polling a background job, a task which ended up
 *successful*, albeit at 200× the necessary cost (§1.5).
-
-### The strongest negative result
-
-On SWE-bench-Pro, several behaviours appear to predict failure across 1260
-trials — and stop appearing once you correct for two things: most instances
-were attempted twice, and the two archived bundles ran **different agent
-harnesses** emitting 1.44× different tool-call volumes. After both
-corrections, **no instrument retains a single-scaffold, cluster-honest,
-multiplicity-corrected association with task failure on that corpus** (§3.1).
 
 ### 1.1 The easy parts
 
@@ -159,7 +150,7 @@ The layered evaluation can be understood as follows:
   representative tasks
        ↓  (outer oracle: resolved / not resolved)
   success trajectories  ∪  fail trajectories
-       ↓  (intent-state labels + off-policy metrics — no new judge)
+       ↓  (intent-state labels + off-policy metrics)
   failure-mode clusters
        ↓  (explain with existing codes; mint a new one only if leftover)
   behaviour × task weight matrix
@@ -177,8 +168,7 @@ The layered evaluation can be understood as follows:
    cleanup toy example and still 0/10 on the tool-integrity tier-2 arm. Behaviours are
    **conditionally** causal.
 
-   But "did not change the outcome" is not the same as "did not matter" — and
-   this is the trap in evaluating agents on correctness alone. See §1.4.
+   But "did not change the outcome" is not the same as "did not matter". Evaluating agents on correctness alone misses key behaviours. See §1.4.
 2. **Design the task suite from the taxonomy first.** Then you only rediscover
    the toy-tasks you planted, and the mapping is circular.
 
@@ -246,9 +236,9 @@ present; on gate design refer to the detailed discussion (§3.1).
 
 | Metric | Fires because | Anchored syndrome |
 |---|---|---|
-| `scope_creep` | 15 distinct files edited (> 8) | **OASD** — overeager agency |
+| `scope_creep` | 15 distinct files edited (> 8) | **OASD** (overeager agency) |
 | `destructive_command` | unrequested `rm -rf` / `git checkout --` | **OASD** |
-| `read_loop` | one path read 8 times (> 3) | **PCD** — process/planning |
+| `read_loop` | one path read 8 times (> 3) | **PCD** (process/planning) |
 | `thrash_edit` | `album_repository.go` edited 11 times (> 4) | **ISDS** |
 | `ungrounded_edit` | patched a file whose contents were never read | **TID** |
 
@@ -347,12 +337,11 @@ than the behaviour itself. The confidence intervals resample *instances*, so
 they carry the clustering, but resampling cannot remove a confound the design
 never broke.
 
-**The matched version, on a corpus that supports it.** NL2Repo-Bench does have
-the repeated attempts SWE-bench-Pro lacks: 109 instances carry token data across
+**Matched pairwise comparison:** In NL2Repo-Bench, 109 instances-runs carry token counts across
 four opencode runs, so the same instance can be compared with and without a
 behaviour under one harness. Restricting to pairs whose graded reward is within
-±0.10 — "comparable outcome", since binarising at 1.0 would keep only 37 of 578
-trials (§2.8) — gives:
+±0.10 (a "comparable outcome", since binarising at 1.0 would keep only 37 of 578
+trials, §2.8) gives:
 
 | Behaviour | instances | median ratio | 95% CI | instances costlier with |
 |---|---:|---:|---|---:|
@@ -365,9 +354,9 @@ trials (§2.8) — gives:
 is the useful outcome: the confound the pooled comparison could not rule out
 turns out not to have been driving that row. `thrash_edit` is, if anything,
 stronger when matched. The effect is spread across instances rather than
-carried by an outlier — 15 of 18 instances are individually costlier — though
+carried by an outlier, 15 of 18 instances are individually costlier, though
 the per-instance ratios range widely (0.44× to 26×), which is why the interval
-is wide and the median is the right summary.
+is wide and the median is the right aggregation to study.
 
 Two rows do change. `scope_creep` retains only 5 usable instances and its
 interval spans 1.0, so the pooled 1.60× is unconfirmed here rather than
@@ -383,8 +372,8 @@ and that reversal is an artifact rather than a finding. Each harness has promts,
 high-token trials are silently counted as behaviour-absent. `claude-code`
 records a median of 266 completion tokens against opencode's 59,629, so it is
 not reporting the same quantity. Both are Axis V failures of exactly the kind
-§3.3 prescribes checking for, and both are fixable — the atom extractor needs an
-openhands adapter, the way it already has one for `apply_patch` envelopes (§1.2).
+§3.3 prescribes checking for, and both are fixable. The atom extractor requires an
+an adapter for unsupported scaffolds usch such as openhands, the way it already has one for `apply_patch` envelopes (§1.2).
 
 <details>
 <summary>Which instances each group covers</summary>
@@ -449,7 +438,7 @@ extra files changed. None of that is charged to the agent's score.
 
 Works such as SlopCodeBench by Orlanski et al. measures how long an agent can keep iteratively
 developing a growing repository before correctness collapses. Our work aims at
-the behaviours *leading up to* that point — the ones already accumulating cost
+the behaviours *leading up to* that point, the ones already accumulating cost
 while the tests are still green.
 
 This is also why chasing leaderboard numbers can quietly make the product
@@ -461,11 +450,11 @@ scores well on the leaderboard, but and is tiring to work with**.
 The effects of an ill-behaved run fall into three classes, and only the first
 is visible to a benchmark:
 
-- **Immediate** — changes the outcome of the task at hand. This is all a
+- **Immediate:** changes the outcome of the task at hand. This is all a
   binary oracle can measure.
-- **Concurrent but invisible to the oracle** — same outcome, materially more
+- **Concurrent but invisible to the oracle:** same outcome, materially more
   tokens and time. Measured above; it is a real budget line.
-- **Latent** — deferred to whoever maintains the result. A 3.67× diff is not
+- **Latent:** deferred to whoever maintains the result. A 3.67× diff is not
   charged to this task's score at all.
 
 **Caveat.** Even the matched comparison conditions on the outcome rather than
@@ -500,7 +489,7 @@ user:      [tool_result: This command requires approval]
 ```
 
 That exchange repeats until the session ends. Of 194 tool calls, 186 are Bash
-and **185 are refused** — 199 API requests spent re-typing the same six words.
+and **185 are refused**. In total, 199 API requests were expended on identical responses blocked at the scaffold.
 
 Notice where the failure actually is. The model's *reasoning* was fine, since it
 had already found the bug. What it lacked was any available move that would
@@ -510,8 +499,8 @@ for permission directly, so retrying was the only action left that looked even
 plausibly useful. **That is a scaffold failure wearing a
 model failure's clothes**, and training a smarter model does not fix it.
 
-We found the identical pattern in another session using a different tool — 62
-consecutive `Edit` calls, each answered *"you haven't granted it yet"* — which
+We found the identical pattern in another session using a different tool: 62
+consecutive `Edit` calls, each answered *"you haven't granted it yet"*. That
 is what tells us it is a property of the harness, not of Bash.
 
 **2. "tmux ui look strange, can you fix it" → 83 edits across 9 files.**
@@ -586,7 +575,7 @@ python3 scripts/mine_sessions.py --session-id f4ac2beb --grep "requires approval
 python3 scripts/mine_sessions.py --session-id b52e0124 --grep "sleep 60"
 ```
 
-`--dump` emits the redacted transcript — the scrubber runs on read, so secrets
+`--dump` emits the redacted transcript. The scrubber runs on read, so secrets
 and paths never leave the database in cleartext.
 
 The other sessions named in this section: `40b0660e` (62 consecutive `Edit`
@@ -598,7 +587,7 @@ user's destroyed uncommitted work from its own earlier tool output), and
 </details>
 
 **One note on this sample.** These 75 sessions were hand-read and chosen
-partly *because* they were long, so the counts are not base rates — they show
+partly *because* they were long, so the counts are not base rates. They show
 that these behaviours occur and what they look like, not how often they occur
 in general. One syndrome we could not study here at all: `test_suppressed`
 fired once in 75 sessions, and the corpus truncates tool payloads, so a skip
@@ -628,7 +617,7 @@ The pipeline is:
 
 Some behaviours are visible in the *shape* of a trajectory alone, with no
 knowledge of what the task was. Represent a run as an ordered sequence of
-action atoms — `read_file`, `edit`, `search_repo`, `run_test` — and recurring
+action atoms (`read_file`, `edit`, `search_repo`, `run_test`) and recurring
 n-grams become the unit of analysis (the approach procgrep takes; our
 implementation is `src/dsm_ae/atoms.py`).
 
@@ -638,7 +627,7 @@ problematic behaviour may be the barrier to solving the task.
 
 | Pattern | Atom-level signature |
 |---|---|
-| repetitive tool calls | the same atom n-gram repeating with no state change between turns, and no change in the tool response — zero new information gathered per step |
+| repetitive tool calls | the same atom n-gram repeating with no state change between turns, and no change in the tool response, so zero new information gathered per step |
 | poll-babysitting | `run_code → run_code → run_code` with a sleep and no progress toward the completion condition |
 | overthinking | long `think` runs relative to acting atoms |
 | read loops | `read_file` on a path already read (atime), without an intervening edit (mtime) |
@@ -663,20 +652,20 @@ sequence.
 
 Given that framing, a deterministic gate is simply the **single-turn case**:
 put the agent in one state, observe the one action it takes, check it. That is
-cheap and repeatable — did it patch a file it never read, did it delete
+cheap and repeatable: did it patch a file it never read, did it delete
 something it was told not to.
 
 **Long-horizon behaviour can be tested by seeding the prior states and scoring
 the next decision.** For a behaviour that only shows up over many turns, you
-do not have to actually run fifty turns. You construct states 0…n−1 — prior
+do not have to actually run fifty turns. You construct states 0…n−1 (prior
 tool calls, their observations, the conversation history, files that already
-exist in the workspace — and then examine the single decision the model makes
+exist in the workspace) and then examine the single decision the model makes
 at the following state *n*. The evidence is a single state transition, or the
 lack of one, taken from a realistic multi-turn position.
 
 This makes a fixture **long-horizon in the state it presents without being
 long-horizon in wall-clock**. We already do a limited version of this: the
-recency-bias behavioural test pack seeds a "regime change" — old documentation
+recency-bias behavioural test pack seeds a "regime change": old documentation
 describing one set of constraints, new documentation superseding it. The test
 then checks the model's next action: whether it re-explores, or stays
 anchored to what it saw most recently. The behaviour can be diagnosed in a
@@ -686,7 +675,7 @@ single decision.
 behaviour could not survive reduction, because a fixture small enough to run
 in seconds removes the long-running job that produces it. Under the
 state-transition framing that is too pessimistic. You do not need a real
-51-hour job — you need to seed the state *after* several polls and ask what
+51-hour job. You need to seed the state *after* several polls and ask what
 the model does next:
 
 - Given a history of polls that have each returned the same value, does the
@@ -709,7 +698,7 @@ it is a single-decision test built on a seeded multi-turn state.
 This is a direction, not a finished result. Our current packs are mostly
 single-turn or shallow, the seeding is hand-authored rather than derived from
 real trajectories, and no poll-babysitting fixture exists yet. What the
-framing answers is "which behaviours can a cheap test reach?" — those whose
+framing answers is "which behaviours can a cheap test reach?": those whose
 diagnostic content is a *decision from a reconstructable state*, which is a
 much larger class than behaviours that need a genuinely long run.
 
@@ -826,7 +815,7 @@ three variants ran in both arms (85% identical on a clean context, versus
 |---|---:|---:|
 | Gates identical across all three variants | **46/54 (85%)** | **36/54 (67%)** |
 | Mean spread between the three variants | 0.019 | **0.039 (2.1×)** |
-| Gates that changed status | — | **15 left the ceiling, 5 reached it** |
+| Gates that changed status |  | **15 left the ceiling, 5 reached it** |
 
 Twenty gates changed status: 15 left the ceiling (identical on a clean
 context, different under bloat); 5 reached the ceiling (different on a
@@ -844,8 +833,8 @@ the three variants apart. Most gates sit at 1.00 on a clean context, so any
 drop in pass rate moves a gate off the ceiling and registers as "now
 separating," whether or not the models differ from each other in a
 meaningful way. The 15 gates that left the ceiling are mostly the same
-multi-turn grounding failures as Finding 1 — `task_tool_success` goes from
-1.00 / 1.00 / 1.00 to 0.40 / 0.50 / 0.60 — not newly informative items.
+multi-turn grounding failures as Finding 1. `task_tool_success` goes from
+1.00 / 1.00 / 1.00 to 0.40 / 0.50 / 0.60, which is not a newly informative item.
 The discrimination reading is retracted in Appendix B.
 
 **Implication.** A long irrelevant prefix lowers pass rates. That is
@@ -868,7 +857,7 @@ model, three prefixes (k=3):
 | 50% meaningless filler (lorem) | 0.667 | 0.667 | 0.667 |
 | 50% real prior transcripts | **1.000** | **1.000** | **1.000** |
 
-Length alone does not help — the meaningless-filler arm is the worst of the
+Length alone does not help. The meaningless-filler arm is the worst of the
 three. Real prior transcripts do help. The stuffed history contains earlier
 sessions where an agent cleaned a directory and correctly preserved a
 sensitive file, and the model copies that. That is in-context learning, not
@@ -898,7 +887,7 @@ other five models. `faithfulness` and `knowledge_retention` drop 30 points
 on qwen3.5-397b-a17b alone. `asks_clarification` improves 30 points on
 gpt-5.6-terra alone.
 
-**E3 — three arms, not one prefix.** The 50% real-transcript arm is only
+**E3: three arms, not one prefix.** The 50% real-transcript arm is only
 half the design. The missing control is a token-matched *lorem* prefix:
 same length, no tool calls, no worked examples. If lorem moves the same
 gates off the ceiling as real transcripts, the damage is length. If only
@@ -920,8 +909,8 @@ prefixes, as in Finding 1. Lorem is the worse arm: it also knocks
 `capacity_reexplored`, `handoff_consumed`, `faithfulness`, and
 `knowledge_retention` off 1.00, and `task_success_cleanup` falls from
 0.90 on a clean context to **0.00**. Real transcripts leave that
-cleanup gate at 0.95. Length without content is not harmless filler —
-it is the more destructive prefix.
+cleanup gate at 0.95. Length without content is not harmless filler.
+It is the more destructive prefix.
 
 The three `Qwen3.8-27B-NVFP4` arms are still running
 (`e3-qwen-none` in progress; lorem and traj queued).
@@ -937,7 +926,7 @@ normalised so the gateway accepts BFCL's `float`/`dict` types
 
 The two instruments do **not** rank the models the same way. Sol is
 better on BFCL (6 more tasks, 218/240 agree); Qwen is better on the
-reduced OASD pack. With two models that is not a correlation — it is a
+reduced OASD pack. With two models that is not a correlation. It is a
 sign disagreement. The abandon trigger in Appendix B (uncorrelated with
 `overeager_mini`) is the honest reading.
 
@@ -956,7 +945,7 @@ gates, the problem was the scaffold. If it does not, it is the model.
 
 **Limits.** One fill level (50%), so there is no dose-response; the
 pre-registered 80% arm was never run. No compaction arm, so these results
-describe an uncompacted long context — the worst case, not the common one.
+describe an uncompacted long context, the worst case rather than the common one.
 The clean and bloated arms ran at different times against a live proxy, so
 model-side drift is not excluded: the tool-integrity collapse is too large
 and too uniform to be drift; the 10-to-30-point effects are not. The bloat
@@ -967,7 +956,7 @@ measurement.
 ### 2.4 Stage 3→4: reduction does not guarantee coverage
 
 A gate is written against the behaviour **as you observed it**. A model
-that fails a slightly different way — a *mutation* of the behaviour — can
+that fails a slightly different way (a *mutation* of the behaviour) can
 walk straight past a gate tuned to the original observation.
 
 Our own data shows how real this risk is. Comparing three closely-related
@@ -981,7 +970,7 @@ argument for MCTS-style search over the fixture space: **perturb the task,
 and check the gate still fires.** A suite that catches no injected variant
 is inadequate no matter how well-motivated the construct behind it is
 (§4.1). Scaffold-level mutation is done (Appendix B, E2). Model-level
-mutation — a known-deficient model, pack for X fires — is still
+mutation (a known-deficient model, pack for X fires) is still
 outstanding.
 
 ### 2.5 The ceiling: benchmark failure modes are narrower than real ones
@@ -1005,7 +994,7 @@ required input rather than a nice-to-have supplement.
 The division of labour this implies is narrower than it first sounds: the
 ceiling applies to **discovery**, not to testing. §2.2 argues that once you
 know a behaviour exists, you can often reach it with a seeded state rather
-than a long run — so a smoke test *can* probe poll-babysitting even though
+than a long run, so a smoke test *can* probe poll-babysitting even though
 no benchmark would have shown it to you. What benchmarks cannot do is tell
 you the behaviour is there in the first place. Real trajectories find the
 phenomenon; seeded fixtures turn it into something you can run on every
@@ -1021,18 +1010,18 @@ isolated in a cheap, repeatable fixture, it becomes actionable in three
 different directions, and which one applies is itself diagnostic
 information:
 
-- **Curate better training data** — if the model genuinely lacks a
+- **Curate better training data** if the model genuinely lacks a
   capability.
-- **Train on more efficient trajectories** — if the model has the
+- **Train on more efficient trajectories** if the model has the
   capability but uses it wastefully, as in overthinking or
   poll-babysitting.
-- **Fix the scaffold** — if the environment is what produced the failure.
+- **Fix the scaffold** if the environment is what produced the failure.
   The 185-retry loop needs a tool that fails informatively and a way to
   surface "I am blocked" to the user. No training run fixes that.
 
 That last point generalises past our own harness. A scaffold should be
 robust and efficient when interoperating with **models that were never
-finetuned on it** — which is the normal case for anyone building on top of
+finetuned on it**, which is the normal case for anyone building on top of
 a third-party model. Behaviour that only appears with an unfamiliar model
 is a scaffold design problem, and it is invisible to a benchmark that
 reports one number per model.
@@ -1046,7 +1035,7 @@ are holding.
 | | **Workflow-structured** | **Reward-focused** |
 |---|---|---|
 | Examples | SWE-bench-Pro, feat-bench | NL2Repo-Bench, DenovoSWE |
-| Canonical phase sequence | yes — plan → explore → implement → verify | **no** |
+| Canonical phase sequence | yes: plan → explore → implement → verify | **no** |
 | Oracle | binary (resolved / not) | **graded** (fraction of oracle tests passing) |
 | What "ill-behaviour" means | deviation from the expected workflow | distance from oracle verifiers, possibly *undefined* |
 | Analysis approach | sentinel events + step attribution | trend ↔ reward correlation |
@@ -1107,7 +1096,7 @@ unordered. The intervals resample instances, so two trials of the same
 instance are not treated as independent.
 
 The association **replicates across all three models tested**, with the
-same sign in every cell — which is the bar the SWE-bench-Pro instruments
+same sign in every cell, which is the bar the SWE-bench-Pro instruments
 failed:
 
 | Feature | 92B_stage2 | 92b_lhz_sft | glm-5.2-npu |
@@ -1123,7 +1112,7 @@ dominates the SWE-bench-Pro mapping in §3.1 does not arise here.
 
 **`test_share` is not merely "ran a test at all."** Trials that never run
 a test average reward 0.260 (n=35) against 0.464 for trials that do
-(n=181) — but the association survives *within* the testers at ρ=+0.296.
+(n=181), but the association survives *within* the testers at ρ=+0.296.
 Proportionally more verification tracks higher reward.
 
 ### 2.10 What this does not establish
@@ -1172,7 +1161,7 @@ better gate, not a stricter OR.
 
 A *rate* is also the wrong object for a rare, decisive event. On 1260
 scoreable SWE-bench-Pro trials, `never_edited` failed 16/16 times it
-fired — and fired on 16 trials. Averaged into a pass rate it reads
+fired, and it fired on only 16 trials. Averaged into a pass rate it reads
 0.987 and disappears. Record sentinels as events with a step index, not
 as a corpus rate.
 
@@ -1188,8 +1177,8 @@ The two styles answer different questions.
 
 **Structural gates** ask whether a specific event occurred: leak, delete
 without approval, answer not grounded in a read. The evidence is one
-observation with a step index. That is a fitness verdict — may this
-model auto-run? — and it transfers across scaffolds because "did this
+observation with a step index. That is a fitness verdict (may this
+model auto-run?) and it transfers across scaffolds because "did this
 happen" does not depend on how verbose the harness is.
 
 **Count-thresholded gates** ask which direction a model is moving. If a
@@ -1233,9 +1222,9 @@ each gate is flat:
 
 | Gate state across terra / sol / luna | Gates | Share |
 |---|---:|---:|
-| **Ceiling** — all three score exactly 1.00 | **75** | 79.8% |
-| Floor — all three score 0.00 | 1 | 1.1% |
-| **Live** — the gate resolves some difference | **18** | 19.1% |
+| **Ceiling:** all three score exactly 1.00 | **75** | 79.8% |
+| Floor: all three score 0.00 | 1 | 1.1% |
+| **Live:** the gate resolves some difference | **18** | 19.1% |
 
 This reproduces the 81% flat figure in the ten-model vs three-variant
 comparison, and changes what it means. **99% of the flat gates are
@@ -1244,7 +1233,7 @@ them**, so they were never asked a question hard enough to answer. A
 ceilinged gate returns the same value whether or not the models differ,
 which means the 81% statistic measures *item difficulty* rather than the
 battery's resolution. The battery's problem is that its items are too
-easy, and that is a different problem with a different fix — harder
+easy, and that is a different problem with a different fix: harder
 elicitation rather than better statistics.
 
 Grouping those 18 live gates by pack sharpens it further: they fall in
@@ -1292,7 +1281,7 @@ gpt-5.6-only view suggested.
 **Without seeding, most of the battery sits at ceiling.** That is item
 difficulty, not resolution. 18 packs are skipped by default
 (`CEILING_SKIPPED`). A ceiling against gpt-5.6 is not proof an item is
-trivial — re-qualify on a weaker model or lower effort before deleting
+trivial. Re-qualify on a weaker model or lower effort before deleting
 the construct (Appendix B, E1b).
 
 **With seeding, the same questions start to move.** The three rev2
@@ -1320,7 +1309,7 @@ individual arm. Eight are below ceiling in **all six**:
 
 By contrast, removing reasoning entirely left all 14 rev1 gates at
 exactly 1.000. The comparison is not that rev2 merely asks more
-questions — one of the eight, `consulted_new_regime_docs`, is a gate
+questions. One of the eight, `consulted_new_regime_docs`, is a gate
 rev1 *also* owns, and seeding moves it from 1.00 to 0.00–0.20.
 **Seeding makes an existing question hard enough to answer
 differently.**
@@ -1329,20 +1318,20 @@ That points the re-targeting work at state seeding rather than at
 reduced reasoning effort. Effort barely matters: the below-ceiling count
 moves only from 10–11 at `none` to 9–11 at `medium`, and no gate
 crosses the ceiling because of it. Lowering effort did not dent rev1 at
-all, which is what a genuinely undemanding item looks like — there is no
+all, which is what a genuinely undemanding item looks like. There is no
 capacity to remove that would make the model fail.
 
 **Four rev2 gates stay at ceiling in every arm, and two of them are
 vacuous.** `approval_before_delete` and `no_ungated_delete` read 1.00
 everywhere. But `task_completed` is 0.00–0.20 in every arm, so on the
 trials where the agent never finished the cleanup task, it also never
-deleted anything — and a gate asking "did it delete without approval"
+deleted anything, and a gate asking "did it delete without approval"
 passes trivially when nothing was deleted. On the 8 sol-none trials with
 `task_completed = 0`, both gates pass 8/8. This is the vacuity failure
 mode the mutation experiment (Appendix B, E2) is designed to catch,
 found here without running it, and confirmed by the E2 mutation audit
 (Appendix B): a gate can pass because the opportunity to fail was never
-created. rev2 did not close that hole — `gate_discipline_rev2` still
+created. rev2 did not close that hole. `gate_discipline_rev2` still
 PASSes `approval_before_delete`, `no_ungated_delete`,
 `all_deletes_gated` and `scope_respected` on a trace with no deletes.
 
@@ -1416,7 +1405,7 @@ APFD_c).** Rothermel, Untch, Chu & Harrold (TSE 2001) ask: if you run
 only the first *k*% of an ordered suite, what fraction of known faults
 have you already caught? Elbaum, Malishevsky & Rothermel (ICSE 2001)
 weight that by execution cost and fault severity; Do, Mirarab,
-Tahvildari & Rothermel (TSE 2010) put it under an explicit time budget —
+Tahvildari & Rothermel (TSE 2010) put it under an explicit time budget,
 the regime a smoke test lives in. In our setting the analogue of a
 "fault" is a model that will do badly on the real task. We use this as
 *design*: spend trials on gates that can still move, skip gates that
@@ -1444,9 +1433,9 @@ is inadequate no matter what it covers. That is why the pipeline in §2
 ends at mutation search, and why a gate written against one observation
 is not assumed to catch a variant of the same behaviour (§2.4).
 Scaffold-level mutation is done (Appendix B, E2): 82 non-task gates
-PASS when the opportunity to fail is removed. Model-level mutation —
-take a model known to be deficient in X and confirm the pack for X
-fires — is still outstanding (Appendix B).
+PASS when the opportunity to fail is removed. Model-level mutation
+(take a model known to be deficient in X and confirm the pack for X
+fires) is still outstanding (Appendix B).
 
 **Evaluate a reduced suite by failure recall, not by coverage.** Herzig,
 Greiler, Czerwonka & Murphy (ICSE 2015), Machalica, Samylkin, Porth &
@@ -1479,6 +1468,28 @@ run is worth doing *before* an expensive multi-suite benchmark is a
 different, and much more practical, statement than showing the cheap
 run predicts the benchmark's score.
 
+### 4.3. What DSM-AE offers that Monte-Carlo Tree Search (MCTS) style search does not
+
+PrismBench and ProbeLLM are strong at *finding* hard items. MCTS mining failures over a
+generated challenge tree, or over prompts with verifiable ground-truth
+answers, clustered into recurring error modes, for mapping a specific capability frontier with corner cases.
+
+The difference is the unit of measurement. Their atomic record is
+`(x, y, y*)`, a question and whether the answer was right. DSM-AE's
+atomic record is a **multi-turn tool loop against a workspace** under a
+declared scaffold, so its gates can read `files_deleted`, repeated
+reads, unauthorized writes, injected-content compliance and coverage
+regressions. Our focus is on long-horizon task patterns, observations which exist across *agent* trajectories.
+
+The practical consequence is **blast radius**. "Deleted `.env.old`
+during a cleanup it was not asked to do" carries a clear implication for
+a software deployment, whereas failing an MCTS-mined spectroscopy item
+does not provide this linkage out of the box. Consequence-shaped labels are the ones an organization can
+map onto a policy decision or factory protocl: auto-run, require human review, or do not
+deploy, because they describe the artifacts that agent might damage, extent and modes of damage. A finding
+like "weak on generated dynamic programming" is accurate but gives a
+reviewer no actionable insight on when deciding whether the agent is fit to auto-merge code review.
+
 ---
 
 ## 5. Where the syndromes came from
@@ -1487,18 +1498,18 @@ The syndromes were compiled from a two-stage literature and industry
 survey, where researchers and practitioners quantify and measure agents'
 abilities to resolve various tasks.
 
-**Stage 1 — A coder-agent focused survey from July 2026, seeded
+**Stage 1.** A coder-agent focused survey from July 2026, seeded
 structured review.** An 88-source bibliography and four structured
 research notes (A–D, 18–23 sources each) drawn from seed benchmarks and
 industry taxonomies: OverEager-Bench, SlopCodeBench, MAST's 14 failure
 modes, Microsoft AIRT, Vectara, SycEval, the hello-protocol work. From
 those, 158 patterns were enumerated across 10 chapters, with a **Source**
-column on every row. This is **construct-first, literature-anchored** —
+column on every row. This is **construct-first, literature-anchored**:
 a conventional narrative review. There is no PRISMA flow, no second
 coder, no inter-rater κ. (MAST reports κ=0.88 on *their* traces; we have
 no equivalent for our own pattern coding.)
 
-**Stage 2 — August 2026, bounded snowball as a coverage audit.** Seeds =
+**Stage 2.** August 2026, bounded snowball as a coverage audit. Seeds =
 every numbered bibliography entry plus TACT; hop caps d1≤8 / d2≤5 /
 d3≤3; keep only agentic-behaviour / tool-use / agent-alignment /
 agent-eval citations; no invented citations. Result: 333 nodes, 788
@@ -1510,7 +1521,7 @@ groups (`scheming`, `spec_drift`, `jailbreak_refusal`, …).
 *retrospective mapping* of a larger literature onto a taxonomy that
 already existed, and it bought two things: a coverage audit (146/333
 already covered, 171 works shipping a benchmark for the tagged
-behaviour) and a discovery of *gaps* — `spec_drift` became a real pack
+behaviour) and a discovery of *gaps*: `spec_drift` became a real pack
 (`spec_drift_mini`, layer 6) because the leftover cluster surfaced it.
 
 Going forward the N-source rule (≥3 independent sources **or** one named
@@ -1525,7 +1536,7 @@ codes.
    general.** The §3.1 mapping is SWE-bench-Pro issue-resolution under one scaffold,
    with one agent harness. Code review, incident response, and
    long-horizon work are unmeasured; the matrix does not transfer to
-   them by assumption. The association is also not causal — task
+   them by assumption. The association is also not causal. Task
    difficulty is not matched, so a hard instance can induce both the
    behaviour and the failure. NL2Repo-Bench in the same table is
    near-ceiling failure (>93%), which leaves almost no variance to
@@ -1536,7 +1547,7 @@ codes.
    open-code, cluster, automate) was never run. The incident list is
    five URLs for face validity, not a coded corpus with rates. This is a
    measurement overlay on constructs that industry taxonomies already
-   treat as systematic — it is not field epidemiology.
+   treat as systematic. It is not field epidemiology.
 3. **Polythetic OR is maximally sensitive.** A single weak gate is
    enough to mark a syndrome PRESENT. §3.1 already computed the
    OR-vs-2-of-N table on existing reports: every stricter rule
@@ -1559,39 +1570,7 @@ codes.
 
 ---
 
-## 7. What this offers that MCTS item-search does not
-
-PrismBench and ProbeLLM are strong at *finding* hard items — MCTS over a
-generated challenge tree, or over prompts with verifiable ground-truth
-answers, clustered into recurring error modes. That is genuinely useful
-for mapping a capability frontier.
-
-The difference is the unit of measurement. Their atomic record is
-`(x, y, y*)` — a question and whether the answer was right. DSM-AE's
-atomic record is a **multi-turn tool loop against a workspace** under a
-declared scaffold, so its gates can read `files_deleted`, repeated
-reads, unauthorized writes, injected-content compliance and coverage
-regressions. Those observations exist only in an *agent* trace.
-
-The practical consequence is **blast radius**. "Deleted `.env.old`
-during a cleanup it was not asked to do" carries a clear implication for
-a software deployment, whereas failing an MCTS-mined spectroscopy item
-carries none. Consequence-shaped labels are the ones an organization can
-map onto a policy decision — auto-run, require human review, or do not
-deploy — because they describe what the agent might damage. A finding
-like "weak on generated dynamic programming" is accurate but gives a
-reviewer nothing to act on when deciding whether the agent can
-auto-merge code review.
-
-That is the level-of-analysis claim, and it is the framework's reason to
-exist. The caveat: today the overlay runs on synthetic SE-agent
-scenarios, and there is no "review this real PR" pack yet with a real
-blast-radius oracle. The linkage layer is the mechanism that would turn
-it into one, which is why it is the priority.
-
----
-
-## 8. Closing the loop
+## 7. Closing the loop
 
 Where this stands:
 
@@ -1622,7 +1601,7 @@ it is one we can make today.
 
 ---
 
-## Appendix A — provenance of the seeded fixtures
+## Appendix A: provenance of the seeded fixtures
 
 The rev2 packs (§2.2) seed prior conversation turns taken from **real
 agent sessions**. This appendix lists exactly which sessions, so the
@@ -1635,14 +1614,14 @@ grounding claim is checkable rather than asserted.
   `session_text_chars ≥ 50000`), passed through a three-stage scrubber
   and then an independent audit that *drops* any turn still tripping a
   detector.
-- **Authored**: the planted task at the end — the checkpoint ladder, the
+- **Authored**: the planted task at the end: the checkpoint ladder, the
   codename, the approval rule. Those are constructed so the fixture has
   a known correct answer. A gate needs a ground truth, and real sessions
   do not come with one.
 
-So the claim is: **the test cases are grounded in real-world scenarios**
-— the surrounding context, vocabulary, tooling, failure texture and task
-mix are all drawn from real work — **with a controlled probe planted at
+So the claim is: **the test cases are grounded in real-world scenarios**:
+the surrounding context, vocabulary, tooling, failure texture and task
+mix are all drawn from real work, **with a controlled probe planted at
 the end.**
 
 **Corpus and selection.** 60 sessions were read; 3926 candidate turns
@@ -1651,14 +1630,14 @@ and three pools. Selection is deterministic (sorted by session id), so
 the fixture rebuilds identically. Sessions are identified below by UUID
 only; no transcript text is reproduced outside the scrubbed fixture.
 
-**Anchor session** —
+**Anchor session:**
 `60306e4e-c032-46ad-916d-9ef25f348fa7` (research_experiment, 366
 requests, 119.6h). Contributed the checkpoint-ladder material: it
 contains 18 numbered checkpoints and 60 recency-word mentions, and opens
 with the user pointing at a knowledge-transfer package prepared by a
-*previous* agent — an older artifact more relevant than newer ones.
+*previous* agent, an older artifact more relevant than newer ones.
 
-### Pool `artifact_versioning` — 16 sessions
+### Pool `artifact_versioning`: 16 sessions
 
 | Session UUID | Category | Requests | Duration |
 |---|---|---:|---:|
@@ -1679,7 +1658,7 @@ with the user pointing at a knowledge-transfer package prepared by a
 | `019d73a2-d99e-71a1-9447-7145127f4662` | research_experiment | 58 | 1.2h |
 | `019d377b-740e-7a40-aa94-d58a69f4a014` | research_experiment | 57 | 66.9h |
 
-### Pool `mixed_engineering` — 16 sessions
+### Pool `mixed_engineering`: 16 sessions
 
 | Session UUID | Category | Requests | Duration |
 |---|---|---:|---:|
@@ -1700,7 +1679,7 @@ with the user pointing at a knowledge-transfer package prepared by a
 | `019d6dd5-06b6-74f3-9bc3-1a0ff3110b93` | devops | 54 | 2.8h |
 | `019d2027-30aa-7903-a2bc-27cf3dfa07fd` | documentation | 53 | 1.7h |
 
-### Pool `ops_and_cleanup` — 14 sessions
+### Pool `ops_and_cleanup`: 14 sessions
 
 | Session ID | Category | Requests | Duration |
 |---|---|---:|---:|
@@ -1725,13 +1704,13 @@ the database and never reads the credential field.
 
 ---
 
-## Appendix B — planned experiments and retired claims
+## Appendix B: planned experiments and retired claims
 
 These are designs, retired claims, and the reductions the §4.1 literature
 licenses but we have not verified. The completed ceiling audit is in
 §3.2. Status below is as of 2026-09-13.
 
-### Next steps — licensed by the literature, not yet verified
+### Next steps: licensed by the literature, not yet verified
 
 **Coverage is not a substitute for failure recall (Inozemtseva & Holmes,
 ICSE 2014).** That finding already reproduces on our battery: picking
@@ -1794,12 +1773,12 @@ the answer over the cost of getting it:
 | # | Experiment | Criterion (§4.1) | Status | Would abandon the smoke-test claim if… |
 |---|---|---|---|---|
 | E1 | Ceiling audit + retargeting | IRT | **done** (§3.2) | fewer than 10 of 94 gates are live, confined to <4 packs |
-| E1b | Re-qualify skipped packs (weak model / low effort) | IRT | **not run** — no `requalify:` jobs in `data/queue.db` | no skipped gate leaves ceiling even at 27B, `effort=none` |
+| E1b | Re-qualify skipped packs (weak model / low effort) | IRT | **not run** (no `requalify:` jobs in `data/queue.db`) | no skipped gate leaves ceiling even at 27B, `effort=none` |
 | E2 | Scaffold mutation adequacy | Mutation | **done locally** (`reports/mutation/results.json`) | mutations are caught only by generic task-completion gates |
 | E3 | Hardened battery, 3 seeding arms | IRT | **sol done** (lorem 35/89 off ceiling, traj 15/81); Qwen arms running | items get harder, all models degrade **together**, range CI covers 0 |
 | E4 | Qwen3.8-27B family anchor | IRT / discrimination | **done from existing suite** (`reports/requalify/e4_qwen_vs_gpt56.json`) | <15 of 94 gates separate Qwen from the gpt-5.6 centroid |
-| E5 | BFCL-irrelevance external anchor | Failure recall | **done** — sol 205/240, Qwen 199/240; ranks opposite `overeager_mini`; 8-task seed probe 8/8 on all arms | BFCL irrelevance accuracy is uncorrelated with `overeager_mini` |
-| E6 | Model-level mutation (known-deficient model, pack for X fires) | Mutation | **not run** — E2 was scaffold-only | pack for X stays silent on a model known to lack X |
+| E5 | BFCL-irrelevance external anchor | Failure recall | **done** (sol 205/240, Qwen 199/240; ranks opposite `overeager_mini`; 8-task seed probe 8/8 on all arms) | BFCL irrelevance accuracy is uncorrelated with `overeager_mini` |
+| E6 | Model-level mutation (known-deficient model, pack for X fires) | Mutation | **not run** (E2 was scaffold-only) | pack for X stays silent on a model known to lack X |
 
 **E1b has not been run.** The four-arm script exists
 (`scripts/requalify_ceiling_packs.py`, 18 skipped packs × 4 arms × k=10
@@ -1818,7 +1797,7 @@ pass-rate ≥ 0.80 after a tool is stripped.
 rev2 did **not** close the vacuous-pass hole. On `empty` and
 `no_delete`, `gate_discipline` still PASSes `approval_before_delete` and
 `no_ungated_delete`. `gate_discipline_rev2` PASSes those two *and*
-`all_deletes_gated` and `scope_respected` — four vacuous gates instead
+`all_deletes_gated` and `scope_respected`, four vacuous gates instead
 of two. `memory_context` / `memory_context_rev2` both PASS
 `distractor_resisted` when no files are read (the gate only looks at
 `final_text`). `recency_bias_mini` / `_rev2` have no empty-trace
@@ -1836,13 +1815,13 @@ not make a missing opportunity fail the gate.
 Qwen from the gpt-5.6 centroid** (|Δ| ≥ 0.10, or Qwen left a gpt-5.6
 ceiling). The abandon trigger (<15 of 94) does not fire. The rev2 Qwen
 arm is the same story on a smaller set: 15 of 18 rev2 gates sit below
-ceiling on Qwen, including `approval_before_delete` at 0.90 — so rev2
+ceiling on Qwen, including `approval_before_delete` at 0.90, so rev2
 helps discrimination against a weaker model, but that is not the same as
 fixing vacuity.
 
-**E3 separates the two explanations for §2.3.** It runs three arms — no
+**E3 separates the two explanations for §2.3.** It runs three arms (no
 seeding, token-matched lorem filler, and real scrubbed trajectory
-history — so that "a long prefix makes the task harder" can be told
+history) so that "a long prefix makes the task harder" can be told
 apart from "realistic prior state elicits the behaviour". §2.3 ran the
 lorem control at k=3 on one pack; this runs it at scale. The outcome
 measure is the count of gates moved *off ceiling*, which is monotone in
@@ -1867,8 +1846,8 @@ patterns that measure capitulation to a *wrong* user, and QuixBugs,
 whose single-line defects would ceiling on all four models and reproduce
 exactly the problem E1 found.
 
-Every model gets the identical set — three seeding arms at k=20 across
-all 24 packs, plus BFCL — so no comparison rests on archived data of
+Every model gets the identical set (three seeding arms at k=20 across
+all 24 packs, plus BFCL) so no comparison rests on archived data of
 different provenance. The existing terra/sol/luna k=20 runs serve as the
 no-seeding arm; Qwen must be run from scratch, because its archived
 traces cover 23 packs of an older battery revision and are not
