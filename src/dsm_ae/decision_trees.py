@@ -154,6 +154,15 @@ def evaluate_tree(tree: SyndromeTree, gates: dict[str, GateView]) -> PathwayResu
                     gate=None,
                 )
             )
+            # A tree routes to its `term_ne` terminal when the availability gate
+            # fails -- predicate `all_available` is False because the required
+            # packs were never run. That terminal carries present=False like any
+            # other, so without this flag a caller cannot tell "we checked and
+            # the syndrome is absent" (`term_neg`) from "we never collected the
+            # metrics" (`term_ne`), and reports the former for both.
+            is_not_eval = node.id == "term_ne" or str(node.label or "").upper().startswith(
+                "NOT EVALUATED"
+            )
             return PathwayResult(
                 code=tree.code,
                 name=tree.name,
@@ -161,6 +170,7 @@ def evaluate_tree(tree: SyndromeTree, gates: dict[str, GateView]) -> PathwayResu
                 severity=node.severity or ("none" if not node.present else "moderate"),
                 steps=steps,
                 terminal_label=node.label,
+                not_evaluated=is_not_eval,
             )
         if node.kind == "start":
             steps.append(

@@ -774,8 +774,11 @@ def finding_cell_attrs(
 
 
 def fmt_finding_cell(finding: dict[str, Any] | None) -> tuple[str, str]:
+    # No finding and no tree verdict means the syndrome's packs were never run
+    # for this model. That is not evidence of absence, so it must not render as
+    # "Not present".
     if finding is None:
-        return "Not run", "not-run"
+        return "Insufficient data", "not-run"
     present = finding.get("present")
     sev = finding.get("severity") or "none"
     if present:
@@ -940,7 +943,7 @@ def render_syndrome_section(
         dm = f' data-model="{_esc(m)}"'
         if pw.not_evaluated:
             chips.append(
-                f'<span class="chip neval"{dm}>{_esc(m)}: not evaluated</span>'
+                f'<span class="chip neval"{dm}>{_esc(m)}: insufficient data</span>'
             )
         elif pw.present:
             chips.append(
@@ -1243,8 +1246,11 @@ def build_html(
             if f is None and tree is not None:
                 pw = evaluate_tree(tree, gates_from_report_acc(by_model[m]))
                 if pw.not_evaluated:
-                    text, cls = "Not run", "not-run"
-                    attrs = finding_cell_attrs("Not evaluated on this model")
+                    text, cls = "Insufficient data", "not-run"
+                    attrs = finding_cell_attrs(
+                        "Insufficient data — the packs backing this syndrome "
+                        "were not run for this model, so absence cannot be inferred."
+                    )
                 elif pw.present:
                     text, cls = f"Present · {pw.severity}", "present"
                     attrs = finding_cell_attrs(
@@ -1261,7 +1267,10 @@ def build_html(
                 if f and f.get("rationale"):
                     tip = humanize_eval_text(str(f["rationale"]))[:400]
                 elif f is None:
-                    tip = "Not run"
+                    tip = (
+                        "Insufficient data — the packs backing this syndrome "
+                        "were not run for this model, so absence cannot be inferred."
+                    )
                 attrs = finding_cell_attrs(
                     tip,
                     present=bool(f.get("present")) if f else None,
@@ -1650,7 +1659,7 @@ def build_html(
     <span><i class="swatch pass"></i> Pass / ran / not present</span>
     <span><i class="swatch fail"></i> Fail / present</span>
     <span><i class="swatch unstable"></i> Unstable</span>
-    <span><i class="swatch not-run"></i> Not run</span>
+    <span><i class="swatch not-run"></i> Not run / insufficient data</span>
   </div>
   <details class="model-filter" id="model-filter" open>
     <summary>Compare models — show / hide columns
