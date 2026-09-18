@@ -112,9 +112,33 @@ def load_report(path: Path) -> dict[str, Any] | None:
     return data
 
 
+# Transport aliases: several models.yaml entries point at the SAME backend model
+# and differ only in how the request is routed (gateway vs SSH tunnel) or in a
+# name the gateway has since retired. Reporting them as separate columns splits
+# one model's evidence into fragments that each look sparse, and makes the
+# ceiling audit read as "insufficient data" on packs that were in fact run.
+# Suffixes are stripped so all routes collapse to the served model name.
+_MODEL_ALIAS_SUFFIXES = ("-tunnel", "-direct", "-funnel")
+_MODEL_ALIASES = {
+    # the gateway renamed this model on 2026-09-12; same weights, same backend
+    "Qwen3.8-27B-NVFP4-BF16-LMHead": "Qwen3.8-27B-NVFP4",
+}
+
+
+def canonical_model(name: str) -> str:
+    n = str(name or "unknown").strip()
+    if n in _MODEL_ALIASES:
+        return _MODEL_ALIASES[n]
+    for suf in _MODEL_ALIAS_SUFFIXES:
+        if n.endswith(suf):
+            base = n[: -len(suf)]
+            return _MODEL_ALIASES.get(base, base)
+    return n
+
+
 def model_id(report: dict[str, Any]) -> str:
     card = report.get("scaffold_card") or {}
-    return str(card.get("model") or report.get("model") or "unknown")
+    return canonical_model(str(card.get("model") or report.get("model") or "unknown"))
 
 
 def _obs_from_bootstrap(b: dict[str, Any]) -> list[tuple[float, bool]]:

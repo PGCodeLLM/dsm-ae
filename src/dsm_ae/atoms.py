@@ -68,6 +68,8 @@ _NAME_MAP = {
     "search": "search_repo",
     "done": "submit",
     "submit": "submit",
+    # openhands / DeNovoSWE terminate with `finish` rather than `submit`.
+    "finish": "submit",
     "request_approval": "gate",
     "approve": "gate",
 }
@@ -75,6 +77,17 @@ _NAME_MAP = {
 _TEST_RE = re.compile(
     r"\b(pytest|py.test|unittest|npm test|cargo test|go test|make test|nox|tox)\b",
     re.I,
+)
+# Verification does not always go through a formal runner. On DeNovoSWE
+# trajectories only 15 of 60 sampled agents invoke pytest; the other 45 verify
+# by piping an ad-hoc assertion script into the interpreter
+# (`python3 -c "... assert ..."`). Counting only the formal runners marks those
+# 45 `unverified_submit`, which is a claim about our regex rather than about the
+# agent. Matched separately so the two styles stay distinguishable.
+_ADHOC_VERIFY_RE = re.compile(
+    r"(python3?\s+-c\b.*\bassert\b|python3?\s+-m\s+(pytest|unittest)\b|"
+    r"\bassert\s+\w|\bunittest\.main\(|\bself\.assert)",
+    re.I | re.S,
 )
 _SEARCH_RE = re.compile(r"\b(ls|find|rg|grep|ag|fd|glob|tree)\b")
 _READ_RE = re.compile(r"\b(cat|head|tail|less|more|sed -n)\b")
@@ -133,14 +146,50 @@ PROCESS_PACKS = frozenset(
 )
 
 
+# Tools that dispatch on a `command` argument rather than on their own name.
+# Mapping the name alone is wrong: `str_replace_editor` with command=view is a
+# read, not an edit, and openhands' `file_editor` behaves the same way. Getting
+# this wrong silently miscounts every read/edit-based instrument.
+_SUBCOMMAND_EDITORS = {"str_replace_editor", "file_editor", "editor", "oh_editor"}
+_EDITOR_SUBCOMMAND_MAP = {
+    "view": "read_file",
+    "read": "read_file",
+    "create": "edit",
+    "write": "edit",
+    "str_replace": "edit",
+    "insert": "edit",
+    "append": "edit",
+    "undo_edit": "edit",
+    "delete": "delete_file",
+}
+
+
 def atom_from_tool(name: str | None, arguments: dict[str, Any] | None = None) -> str:
     raw = (name or "").strip()
+    low_raw = raw.lower()
+    if low_raw in _SUBCOMMAND_EDITORS:
+        sub = ""
+        if isinstance(arguments, dict):
+            sub = str(arguments.get("command") or arguments.get("cmd") or "").strip().lower()
+        return _EDITOR_SUBCOMMAND_MAP.get(sub, "edit" if sub else "other")
     if raw in _NAME_MAP:
         return _NAME_MAP[raw]
     low = raw.lower()
     if low in _NAME_MAP:
         return _NAME_MAP[low]
-    if low in {"shell", "bash", "run", "exec"}:
+    if low in {
+        "shell",
+        "bash",
+        "run",
+        "exec",
+        # DeNovoSWE / openhands / sweagent shell surfaces
+        "execute_bash",
+        "terminal",
+        "run_bash_cmd",
+        "execute_command",
+        "execute_ipython_cell",
+        "execute_code",
+    }:
         cmd = ""
         if isinstance(arguments, dict):
             cmd = str(
