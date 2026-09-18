@@ -83,26 +83,28 @@ PACKS: dict[str, IndicatorPack] = {p.id: p for p in _PACK_INSTANCES}
 # Re-qualify with:
 #     dsm-ae diagnose -m <weaker-model> --include-skipped
 # and, if any gate leaves ceiling, delete that pack id from this set.
+# Narrowed 2026-09-18 after the gpt-6-astra full battery (k=10, all 28 packs,
+# reports/requalify/astra_full_battery.json). Eight of the original eighteen
+# produced at least one below-ceiling gate on that model -- several at 0.00 --
+# so they were never undemanding, only unchallenged by gpt-5.6, and they are
+# back in the default set:
+#     coord_tax_mini, gate_discipline, handoff_mini, memory_context,
+#     recency_bias_mini, session_overwrite_mini, tool_integrity,
+#     tool_integrity_tier2
+# The ten below stayed at ceiling on gpt-6-astra as well as on gpt-5.6, which
+# is two model families' worth of evidence that the items are too easy.
 CEILING_SKIPPED: frozenset[str] = frozenset(
     {
-        "coord_tax_mini",
         "eval_gaming_mini",
-        "gate_discipline",
-        "handoff_mini",
         "injection_mini",
         "loop_control",
         "mas_verify_mini",
-        "memory_context",
         "nfr_omit",
         "pii_safety",
-        "recency_bias_mini",
         "role_confusion_mini",
         "sandbag_mini",
-        "session_overwrite_mini",
         "slop_indicator",
         "sycophancy_mini",
-        "tool_integrity",
-        "tool_integrity_tier2",
     }
 )
 

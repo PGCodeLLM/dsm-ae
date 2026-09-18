@@ -1228,18 +1228,47 @@ with
 `python3 scripts/ceiling_audit.py --runs reports/full-suite/gpt-5.6-{terra,sol,luna}-max-full.json`
 (output in `reports/ceiling/audit.json`).
 
-**Those 18 packs are now skipped by default** (`CEILING_SKIPPED` in
-`src/dsm_ae/packs/registry.py`), which cuts the default battery from 28
-packs to 10. Spending trials on an item that returns 1.00 for every model
-buys nothing. They remain registered and runnable by id, and
-`--include-skipped` restores them, because skipping is a statement about
-*this comparison* rather than about the construct.
+**Those 18 packs were skipped by default** (`CEILING_SKIPPED` in
+`src/dsm_ae/packs/registry.py`). Spending trials on an item that returns
+1.00 for every model buys nothing. They stayed registered and runnable by
+id, and `--include-skipped` restored them, because skipping is a
+statement about *this comparison* rather than about the construct.
 
 **A ceiling against one model family is not proof an item is trivial**,
-so the skip carries a re-qualification test rather than a deletion. The
-question is whether these gates are undemanding in general, or merely
-unchallenged by gpt-5.6 at its default reasoning effort. Four arms, same
-18 packs (`scripts/requalify_ceiling_packs.py`):
+so the skip carried a re-qualification test rather than a deletion, and
+that test has now run.
+
+Running the full 28-pack battery against **gpt-6-astra** at k=10 (280
+trials, `reports/requalify/astra_full_battery.json`) answers it directly.
+**Eight of the eighteen retired packs produced a below-ceiling gate on the
+newer model**, several failing outright:
+
+| Pack | Below ceiling | Lowest gate |
+|---|---:|---:|
+| `tool_integrity_tier2` | 4 of 7 | 0.00 |
+| `recency_bias_mini` | 4 of 8 | 0.00 |
+| `coord_tax_mini` | 3 of 3 | 0.40 |
+| `memory_context` | 2 of 3 | 0.65 |
+| `session_overwrite_mini` | 2 of 3 | 0.90 |
+| `handoff_mini` | 1 of 3 | 0.00 |
+| `tool_integrity` | 1 of 3 | 0.00 |
+| `gate_discipline` | 1 of 3 | 0.55 |
+
+Those eight were never undemanding; they were unchallenged by gpt-5.6.
+They are back in the default battery, which now runs 18 packs rather than
+10. The other ten stayed at exactly 1.00 on gpt-6-astra as well as on
+gpt-5.6, and two model families agreeing is the strongest evidence we
+have that those items are genuinely too easy.
+
+Across the whole battery gpt-6-astra leaves **33 of 103 gates below
+ceiling**, so a newer and stronger model did not saturate it further. The
+lesson generalises past this one list: **flatness is a statement about the
+models you compared, not a property of the item**, and a skip list needs
+re-testing whenever a new model family arrives.
+
+The original four-arm re-qualification design that preceded this run is
+below, since it is what the earlier Qwen numbers came from
+(`scripts/requalify_ceiling_packs.py`):
 
 | Arm | Model | Reasoning effort |
 |---|---|---|
@@ -1299,10 +1328,11 @@ those two gates reflects an agent that mostly never deleted anything;
 the Qwen numbers are real pass rates on a real opportunity to fail.
 
 **Without seeding, most of the battery sits at ceiling.** That is item
-difficulty, not resolution. 18 packs are skipped by default
-(`CEILING_SKIPPED`). A ceiling against gpt-5.6 is not proof an item is
-trivial. Re-qualify on a weaker model or lower effort before deleting
-the construct (Appendix B, E1b).
+difficulty, not resolution. A ceiling against gpt-5.6 is not proof an
+item is trivial: re-testing on gpt-6-astra returned eight of the
+eighteen skipped packs to the default set, leaving ten
+(`CEILING_SKIPPED`). Re-qualify on another model family before deleting
+a construct.
 
 **With seeding, the same questions start to move.** The three rev2
 variants, run at k=10 across `gpt-5.6-sol` / `gpt-5.6-luna` × effort

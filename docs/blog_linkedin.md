@@ -8,11 +8,11 @@ and finished at twice the token cost.
 Your benchmark scores them identically. Your API bill does not.
 
 We built DSM-AE, a diagnostic framework for what actually happens inside
-an agent run, and benchmarked **20+ models** (GPT-5.x, Claude, Gemini,
-DeepSeek, Qwen, GLM, Grok, Pangu — with gpt-6-astra running now) across
-**158 behavioural patterns** and **107 deterministic metrics**. Every
-metric is a deterministic check on the trajectory, not a model grading
-another model.
+an agent run, and benchmarked **21 models** including **gpt-6-astra**
+(plus Claude, Gemini, DeepSeek, Qwen, GLM, Grok, Pangu) across **158
+behavioural patterns** and **107 deterministic metrics**. Every metric is
+a deterministic check on the trajectory, not a model grading another
+model.
 
 **The headline result: we reproduced an execution-based data filter
 without executing anything.**
@@ -50,6 +50,12 @@ returned an identical value across three checkpoints of the same model.**
 Almost all of it was ceiling effect, not missing signal — the items were
 too easy, not the instrument too blunt. We published that, the negative
 results, and the experiments that failed.
+
+🔄 Then the useful correction: we had retired 18 tests as "too easy."
+Re-running them against **gpt-6-astra** brought **8 of the 18 back** —
+several failing outright. A newer, stronger model made them *harder*, not
+easier. Flatness is a statement about the models you compared, not a
+property of the test.
 
 The full write-up covers the metric → behaviour → task-outcome linkage,
 where the pipeline from observed behaviour to regression test leaks, and
