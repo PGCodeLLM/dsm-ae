@@ -25,6 +25,10 @@ COPY sources ./sources
 COPY docs ./docs
 COPY treatment ./treatment
 COPY harbor_tasks ./harbor_tasks
+# composite_fixture seeds its workspace from this tree; without it the pack
+# raises FileNotFoundError before any model call and takes the whole job with
+# it (the worker does not retry on failure).
+COPY fixtures ./fixtures
 COPY models.yaml.example ./models.yaml.example
 
 RUN pip install --upgrade pip \
